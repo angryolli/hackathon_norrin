@@ -127,3 +127,9 @@
     @apply font-sans;
     }
 }
+
+.gpu-layer {
+  transform: translate3d(0, 0, 0);
+  backface-visibility: hidden;
+  will-change: transform;
+}

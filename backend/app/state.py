@@ -269,7 +269,12 @@ class AppState:
                     evidence=evidence,
                 )
             )
-        cards.sort(key=lambda c: c.contribution, reverse=True)
+        cards.sort(
+            key=lambda c: (
+                int("".join(ch for ch in c.sensor_id if ch.isdigit()) or "999999"),
+                c.sensor_id,
+            )
+        )
         try:
             return MonitorSnapshot(
                 calibration_id=cal,
