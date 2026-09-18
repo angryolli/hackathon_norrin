@@ -1,6 +1,10 @@
-# Hackathon Norrin
+# Trustworthy process monitor
 
-First time: `cd backend && uv sync`, then `cd frontend && npm install`.
+Next.js owns the LLM agent. FastAPI only computes statistical artifacts. Raw rows never go to the model.
+
+`data_processing/` is for notebooks and experiments only.
+
+First time: `cd backend && uv sync`, then `cd frontend && npm install`. Put an API key in `frontend/.env`.
 
 **Backend** (from `backend/`):
 
