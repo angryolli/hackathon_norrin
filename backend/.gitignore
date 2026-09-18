@@ -10,3 +10,7 @@ wheels/
 .venv
 
 te_process.csv
+artifacts/*.json
+artifacts/*.jsonl
+artifacts/*/
+data/*.csv

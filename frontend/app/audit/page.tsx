@@ -1,10 +1,10 @@
 import { AppShell } from "@/components/app-shell";
-import { MonitorView } from "@/components/monitor-view";
+import { AuditView } from "@/components/audit-view";
 
 export default function Page() {
   return (
     <AppShell>
-      <MonitorView />
+      <AuditView />
     </AppShell>
   );
 }

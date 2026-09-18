@@ -1,15 +1,13 @@
 # Trustworthy process monitor
 
-Next.js owns the LLM agent. FastAPI only computes statistical artifacts. Raw rows never go to the model.
+FastAPI is the compute plane (raw data stays there). Next.js is the reasoning plane (LLM sees artifacts only).
 
-`data_processing/` is for notebooks and experiments only.
-
-First time: `cd backend && uv sync`, then `cd frontend && npm install`. Put an API key in `frontend/.env`.
+First time: `cd backend && uv sync`, then `cd frontend && npm install`. Copy `frontend/.env.example` to `frontend/.env`.
 
 **Backend** (from `backend/`):
 
 ```bash
-uv run uvicorn main:app --reload --app-dir src --host 0.0.0.0 --port 8000
+uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 **Frontend** (from `frontend/`):
@@ -17,3 +15,5 @@ uv run uvicorn main:app --reload --app-dir src --host 0.0.0.0 --port 8000
 ```bash
 npm run dev
 ```
+
+The backend emits a rolling unlabeled sensor stream while it runs. Switch datasets from the top bar (`industrial_stream` vs `expenses`) — same pipeline code, different CSV pointer.
