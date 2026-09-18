@@ -123,9 +123,19 @@ class AppState:
         self.corr = corr
         self.roles = roles
         self.model = model
-        self.store.write_json(calibration_id, "profile", profile)
-        self.store.write_json(calibration_id, "corr", corr)
-        self.store.write_json(calibration_id, "roles", roles)
+        self.store.put("profile", calibration_id, profile)
+        self.store.put("corr", calibration_id, corr)
+        self.store.put("roles", calibration_id, roles)
+        self.store.put(
+            "calibration",
+            calibration_id,
+            {
+                "dataset_id": self.dataset_id,
+                "n_sensors": len(schema.numeric_cols),
+                "n_rows_used": len(frame),
+                "label_cols": schema.label_cols,
+            },
+        )
         return CalibrateResponse(
             calibration_id=calibration_id,
             dataset_id=self.dataset_id,
@@ -155,6 +165,7 @@ class AppState:
             custom=self.rules,
         )
         self.quality = report
+        self.store.put("quality", cal, report)
         return report
 
     def drift_score(self, exclusion: list[str] | None = None) -> DriftArtifact:
@@ -183,12 +194,17 @@ class AppState:
                 ev.event_id = prev_id
                 artifact.latest_event_id = prev_id
                 self.events[prev_id] = ev
-                self.rankings[prev_id] = rank_event(ev, self.corr, cal)
+                ranking = rank_event(ev, self.corr, cal)
+                self.rankings[prev_id] = ranking
+                self.store.put("event", prev_id, ev)
+                self.store.put("ranking", prev_id, ranking)
             elif ev.event_id not in self.events:
                 self.event_seq += 1
                 self.events[ev.event_id] = ev
                 ranking = rank_event(ev, self.corr, cal)
                 self.rankings[ev.event_id] = ranking
+                self.store.put("event", ev.event_id, ev)
+                self.store.put("ranking", ev.event_id, ranking)
                 self.store.append(
                     DecisionAppend(
                         type="flag",
@@ -196,6 +212,7 @@ class AppState:
                         evidence_ref=ev.evidence,
                     )
                 )
+        self.store.put("drift", cal, artifact)
         return artifact
 
     def tick_live(self) -> None:
@@ -294,6 +311,7 @@ class AppState:
         result = compile_rule(rule, cols, batch if not batch.empty else pd.DataFrame(columns=cols))
         if result.compiled:
             self.rules.append((result.rule_id, rule))
+            self.store.put("rule", result.rule_id, rule.model_dump())
         return result
 
     def ranking(self, event_id: str) -> RankingArtifact:
@@ -307,10 +325,12 @@ class AppState:
             if eid:
                 self.overrides[eid] = body.payload
                 body.human_overridden = True
+                self.store.put("override", eid, body.payload)
         if body.type == "inference" and body.payload.get("accepted"):
             eid = str(body.payload.get("event_id", ""))
             if eid:
                 self.confirmed.add(eid)
+                self.store.put("confirmed", eid, {"accepted": True})
         return self.store.append(body)
 
 

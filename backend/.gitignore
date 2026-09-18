@@ -10,6 +10,8 @@ wheels/
 .venv
 
 te_process.csv
+artifacts/*.sqlite
+artifacts/*.sqlite-*
 artifacts/*.json
 artifacts/*.jsonl
 artifacts/*/
