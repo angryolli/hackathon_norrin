@@ -1,10 +1,5 @@
-import { AppShell } from "@/components/app-shell";
-import { MonitorView } from "@/components/monitor-view";
+import { redirect } from "next/navigation";
 
 export default function Page() {
-  return (
-    <AppShell>
-      <MonitorView />
-    </AppShell>
-  );
+  redirect("/data");
 }

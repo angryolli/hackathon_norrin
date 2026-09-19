@@ -16,4 +16,4 @@ uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 npm run dev
 ```
 
-The backend emits a rolling unlabeled sensor stream while it runs. Switch datasets from the top bar (`industrial_stream` vs `expenses`) — same pipeline code, different CSV pointer.
+The backend emits a rolling unlabeled data-source stream while it runs. Manage sources on the Data page (`industrial_stream`, `expenses`, or ones you add) — same pipeline code, different CSV pointer.

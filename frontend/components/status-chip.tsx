@@ -14,7 +14,7 @@ const labels: Record<Chip, string> = {
   drifting: "Drifting",
   stuck: "Stuck",
   out_of_range: "Out-of-range",
-  excluded: "Excluded — sensor fault",
+  excluded: "Excluded — data fault",
 };
 
 export function StatusChip({ status }: { status: Chip }) {

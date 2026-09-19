@@ -115,7 +115,7 @@ export function OperatorConsole() {
           <CardHeader className="border-b">
             <CardTitle>Diagnosis</CardTitle>
             <CardDescription>
-              The Next.js agent interprets pipeline artifacts. Raw sensor rows
+              The Next.js agent interprets pipeline artifacts. Raw data-source rows
               stay in the operator environment.
             </CardDescription>
             <CardAction>

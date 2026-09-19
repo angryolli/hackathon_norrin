@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import re
 import uuid
 from dataclasses import dataclass, field
 
 import pandas as pd
 
-from app.config import DATASETS, SPARKLINE_POINTS, default_dataset
+from app.config import DATA_DIR, SPARKLINE_POINTS, default_dataset
 from app.correlation.correlation_engine import correlate
 from app.diagnosis.contribution_ranking import rank_event
 from app.drift.calibration import DriftModel, fit_drift_model
@@ -19,10 +20,14 @@ from app.models.schemas import (
     CompileRuleResponse,
     ConfigUpdate,
     CorrelationArtifact,
+    DataSource,
+    DataSourceCreate,
+    DataSourceUpdate,
     DecisionAppend,
     DecisionEntry,
     DriftArtifact,
     DriftEvent,
+    FieldCard,
     MonitorSnapshot,
     ProfileArtifact,
     QualityReport,
@@ -30,7 +35,6 @@ from app.models.schemas import (
     RolesArtifact,
     RuleSchema,
     RuntimeConfig,
-    SensorCard,
 )
 from app.profiling.statistical_profiler import profile_frame
 from app.profiling.structural_classifier import classify_roles
@@ -62,17 +66,123 @@ class AppState:
     overrides: dict[str, dict] = field(default_factory=dict)
 
     def boot(self) -> None:
-        current = self.dataset_id
-        for ds in DATASETS:
-            self.source.reset(ds)
-            self.source.seed_calibration_csv()
-        self.source.reset(current)
+        self.store.seed_data_sources()
+        sources = self.store.list_data_sources()
+        ids = {s["id"] for s in sources}
+        if self.dataset_id not in ids and sources:
+            self.dataset_id = sources[0]["id"]
+        for src in sources:
+            self.source.reset(src["id"], src["generator"])
+            self.source.seed_calibration_csv(src["train_path"], src["live_path"])
+        self._switch_stream(self.dataset_id, seed=False)
         self.calibrate()
+
+    def _source_ids(self) -> list[str]:
+        return [s["id"] for s in self.store.list_data_sources()]
+
+    def _as_data_source(self, row: dict) -> DataSource:
+        return DataSource(**row, active=row["id"] == self.dataset_id)
+
+    def list_data_sources(self) -> list[DataSource]:
+        return [self._as_data_source(row) for row in self.store.list_data_sources()]
+
+    def _unique_source_id(self, name: str) -> str:
+        base = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")[:40] or "source"
+        ids = set(self._source_ids())
+        if base not in ids:
+            return base
+        i = 2
+        while f"{base}_{i}" in ids:
+            i += 1
+        return f"{base}_{i}"
+
+    def _default_generator(self, kind: str, generator: str | None) -> str:
+        if generator:
+            return generator
+        return "expenses" if kind == "business" else "industrial"
+
+    def _switch_stream(self, source_id: str, *, seed: bool) -> None:
+        spec = self.store.get_data_source(source_id)
+        if spec is None:
+            raise ValueError(f"unknown data source {source_id}")
+        self.dataset_id = source_id
+        self.source.reset(source_id, spec["generator"])
+        if seed:
+            self.source.seed_calibration_csv(spec["train_path"], spec["live_path"])
+
+    def _recalibrate_after_switch(self) -> None:
+        self.events.clear()
+        self.rankings.clear()
+        self.rules.clear()
+        self.t2_history.clear()
+        self.confirmed.clear()
+        self.overrides.clear()
+        self.calibrate()
+
+    def _write_source_csv(self, source_id: str, generator: str, train_path: str, live_path: str) -> None:
+        scratch = RollingSource()
+        scratch.reset(source_id, generator)
+        scratch.seed_calibration_csv(train_path, live_path)
+
+    def add_data_source(self, body: DataSourceCreate) -> DataSource:
+        source_id = self._unique_source_id(body.name)
+        generator = self._default_generator(body.kind, body.generator)
+        train_path = str(DATA_DIR / f"{source_id}_train.csv")
+        live_path = str(DATA_DIR / f"{source_id}_live.csv")
+        row = self.store.create_data_source(
+            {
+                "id": source_id,
+                "name": body.name.strip() or source_id,
+                "kind": body.kind,
+                "description": body.description,
+                "generator": generator,
+                "train_path": train_path,
+                "live_path": live_path,
+            }
+        )
+        self._write_source_csv(source_id, generator, train_path, live_path)
+        return self._as_data_source(row)
+
+    def patch_data_source(self, source_id: str, body: DataSourceUpdate) -> DataSource:
+        current = self.store.get_data_source(source_id)
+        if current is None:
+            raise KeyError(source_id)
+        payload = body.model_dump(exclude_unset=True)
+        if "generator" in payload and payload["generator"] is None:
+            payload.pop("generator")
+        row = self.store.update_data_source(source_id, payload)
+        if row is None:
+            raise KeyError(source_id)
+        generator_changed = (
+            "generator" in payload and payload["generator"] != current["generator"]
+        )
+        if generator_changed:
+            if source_id == self.dataset_id:
+                self._switch_stream(source_id, seed=True)
+                self._recalibrate_after_switch()
+            else:
+                self._write_source_csv(
+                    source_id, row["generator"], row["train_path"], row["live_path"]
+                )
+        return self._as_data_source(row)
+
+    def remove_data_source(self, source_id: str) -> None:
+        remaining = [s for s in self.store.list_data_sources() if s["id"] != source_id]
+        if not remaining:
+            raise ValueError("at least one data source is required")
+        if self.store.get_data_source(source_id) is None:
+            raise KeyError(source_id)
+        switching = source_id == self.dataset_id
+        if not self.store.delete_data_source(source_id):
+            raise KeyError(source_id)
+        if switching:
+            self._switch_stream(remaining[0]["id"], seed=True)
+            self._recalibrate_after_switch()
 
     def runtime_config(self) -> RuntimeConfig:
         return RuntimeConfig(
             dataset_id=self.dataset_id,
-            datasets=list(DATASETS.keys()),
+            datasets=self._source_ids(),
             calibration_id=self.calibration_id,
             baseline_established=self.model is not None,
             no_egress=self.no_egress,
@@ -82,22 +192,16 @@ class AppState:
         if body.no_egress is not None:
             self.no_egress = body.no_egress
         if body.dataset_id and body.dataset_id != self.dataset_id:
-            if body.dataset_id not in DATASETS:
-                raise ValueError(f"unknown dataset {body.dataset_id}")
-            self.dataset_id = body.dataset_id
-            self.events.clear()
-            self.rankings.clear()
-            self.rules.clear()
-            self.t2_history.clear()
-            self.confirmed.clear()
-            self.overrides.clear()
-            self.source.reset(self.dataset_id)
-            self.source.seed_calibration_csv()
-            self.calibrate()
+            if body.dataset_id not in self._source_ids():
+                raise ValueError(f"unknown data source {body.dataset_id}")
+            self._switch_stream(body.dataset_id, seed=True)
+            self._recalibrate_after_switch()
         return self.runtime_config()
 
     def calibrate(self) -> CalibrateResponse:
-        spec = DATASETS[self.dataset_id]
+        spec = self.store.get_data_source(self.dataset_id)
+        if spec is None:
+            raise ValueError(f"unknown data source {self.dataset_id}")
         raw = load_csv(spec["train_path"])
         frame, schema = process_frame(raw)
         frame = fault_free_segment(frame, schema.label_cols)
@@ -123,7 +227,7 @@ class AppState:
             calibration_id,
             {
                 "dataset_id": self.dataset_id,
-                "n_sensors": len(schema.numeric_cols),
+                "n_fields": len(schema.numeric_cols),
                 "n_rows_used": len(frame),
                 "label_cols": schema.label_cols,
             },
@@ -131,7 +235,7 @@ class AppState:
         return CalibrateResponse(
             calibration_id=calibration_id,
             dataset_id=self.dataset_id,
-            n_sensors=len(schema.numeric_cols),
+            n_fields=len(schema.numeric_cols),
             n_rows_used=len(frame),
             baseline_established=True,
             evidence=f"fault-free rows={len(frame)} labels={schema.label_cols}",
@@ -226,12 +330,12 @@ class AppState:
         contrib_map: dict[str, float] = {}
         if self.drift and self.drift.events:
             for c in self.drift.events[-1].contributions:
-                contrib_map[c.sensor_id] = c.contribution_score
+                contrib_map[c.field_id] = c.contribution_score
         peak = max(contrib_map.values()) if contrib_map else 0.0
         cal_frozen = {
-            p.sensor_id: p.frozen_rate for p in (self.profile.sensors if self.profile else [])
+            p.field_id: p.frozen_rate for p in (self.profile.fields if self.profile else [])
         }
-        cards: list[SensorCard] = []
+        cards: list[FieldCard] = []
         cols = self.schema.numeric_cols if self.schema else []
         for col in cols:
             spark: list[float] = []
@@ -248,13 +352,13 @@ class AppState:
                         evidence = "near-zero rolling delta in live window"
             if col in excl:
                 status = "excluded"
-                evidence = "excluded — sensor/data fault from quality-check"
+                evidence = "excluded — data-source field fault from quality-check"
             elif status != "stuck" and peak > 0 and contrib_map.get(col, 0) > 0.4 * peak:
                 status = "drifting"
                 evidence = f"contribution={contrib_map[col]:.3f} on latest T2 event"
             cards.append(
-                SensorCard(
-                    sensor_id=col,
+                FieldCard(
+                    field_id=col,
                     sparkline=spark,
                     status=status,
                     contribution=float(contrib_map.get(col, 0)),
@@ -263,8 +367,8 @@ class AppState:
             )
         cards.sort(
             key=lambda c: (
-                int("".join(ch for ch in c.sensor_id if ch.isdigit()) or "999999"),
-                c.sensor_id,
+                int("".join(ch for ch in c.field_id if ch.isdigit()) or "999999"),
+                c.field_id,
             )
         )
         return MonitorSnapshot(
@@ -274,7 +378,7 @@ class AppState:
             t2_series=self.t2_history[-60:],
             control_limit=self.model.t2_limit if self.model else 0.0,
             live_boundary=0,
-            sensors=cards[:40],
+            fields=cards[:40],
             exclusion_list=list(excl)[:20],
             latest_event_id=self.drift.latest_event_id if self.drift else None,
         )

@@ -11,7 +11,7 @@ from app.models.schemas import (
 def classify_roles(
     profile: ProfileArtifact, corr: CorrelationArtifact
 ) -> RolesArtifact:
-    degree: dict[str, float] = {p.sensor_id: 0.0 for p in profile.sensors}
+    degree: dict[str, float] = {p.field_id: 0.0 for p in profile.fields}
     for pair in corr.pairs:
         w = abs(pair.pearson)
         degree[pair.a] = degree.get(pair.a, 0) + w
@@ -19,7 +19,7 @@ def classify_roles(
     max_deg = max(degree.values()) if degree else 1.0
 
     roles: list[StructuralRole] = []
-    for p in profile.sensors:
+    for p in profile.fields:
         quant = max(0.0, 1.0 - p.unique_ratio)
         if p.std and p.std > 0 and p.min is not None and p.max is not None:
             span = p.max - p.min
@@ -30,7 +30,7 @@ def classify_roles(
             bounded = max(0.0, 1.0 - edge_mass)
         else:
             bounded = 0.0
-        centrality = degree.get(p.sensor_id, 0) / max(max_deg, 1e-9)
+        centrality = degree.get(p.field_id, 0) / max(max_deg, 1e-9)
         if quant > 0.55 and bounded > 0.45:
             role = "actuator"
         elif quant < 0.25:
@@ -39,7 +39,7 @@ def classify_roles(
             role = "ambiguous"
         roles.append(
             StructuralRole(
-                sensor_id=p.sensor_id,
+                field_id=p.field_id,
                 role=role,
                 quantization_score=round(quant, 4),
                 bounded_range_score=round(bounded, 4),

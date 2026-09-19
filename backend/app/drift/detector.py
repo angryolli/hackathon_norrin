@@ -42,7 +42,7 @@ def score_batch(
                 continue
             contribs.append(
                 Contribution(
-                    sensor_id=cols[j],
+                    field_id=cols[j],
                     contribution_score=float(contrib[j]),
                     evidence=f"|recon-error|+0.25|z|={float(contrib[j]):.3f} T2={float(t2[idx]):.3f} vs limit {limit:.3f}",
                 )

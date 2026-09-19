@@ -10,12 +10,13 @@ from pydantic import BaseModel
 from sqlalchemy import func, text
 from sqlmodel import Session, SQLModel, col, create_engine, select
 
-from app.config import ARTIFACT_DIR
+from app.config import ARTIFACT_DIR, DEFAULT_DATA_SOURCES
 from app.models.schemas import DecisionAppend, DecisionEntry
 from app.storage.models import (
     ArtifactRecord,
     ChatConversationRecord,
     ChatMessageRecord,
+    DataSourceRecord,
     DecisionLogRecord,
 )
 
@@ -231,5 +232,100 @@ class ArtifactStore:
             for row in rows:
                 session.delete(row)
             session.delete(conv)
+            session.commit()
+            return True
+
+    def _source_dict(self, row: DataSourceRecord) -> dict:
+        return {
+            "id": row.id,
+            "name": row.name,
+            "kind": row.kind,
+            "description": row.description,
+            "generator": row.generator,
+            "train_path": row.train_path,
+            "live_path": row.live_path,
+            "created_at": row.created_at,
+            "updated_at": row.updated_at,
+        }
+
+    def seed_data_sources(self) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._lock, self._session() as session:
+            existing = session.exec(select(DataSourceRecord)).first()
+            if existing is not None:
+                return
+            for spec in DEFAULT_DATA_SOURCES:
+                session.add(
+                    DataSourceRecord(
+                        id=spec["id"],
+                        name=spec["name"],
+                        kind=spec["kind"],
+                        description=spec["description"],
+                        generator=spec["generator"],
+                        train_path=spec["train_path"],
+                        live_path=spec["live_path"],
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
+            session.commit()
+
+    def list_data_sources(self) -> list[dict]:
+        with self._lock, self._session() as session:
+            rows = session.exec(select(DataSourceRecord).order_by(DataSourceRecord.created_at)).all()
+            return [self._source_dict(row) for row in rows]
+
+    def get_data_source(self, source_id: str) -> dict | None:
+        with self._lock, self._session() as session:
+            row = session.get(DataSourceRecord, source_id)
+            return None if row is None else self._source_dict(row)
+
+    def create_data_source(self, body: dict) -> dict:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._lock, self._session() as session:
+            session.add(
+                DataSourceRecord(
+                    id=body["id"],
+                    name=body["name"],
+                    kind=body.get("kind") or "process",
+                    description=body.get("description") or "",
+                    generator=body.get("generator") or "industrial",
+                    train_path=body["train_path"],
+                    live_path=body["live_path"],
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+            session.commit()
+            row = session.get(DataSourceRecord, body["id"])
+            assert row is not None
+            return self._source_dict(row)
+
+    def update_data_source(self, source_id: str, body: dict) -> dict | None:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._lock, self._session() as session:
+            row = session.get(DataSourceRecord, source_id)
+            if row is None:
+                return None
+            if "name" in body and body["name"] is not None:
+                row.name = body["name"]
+            if "kind" in body and body["kind"] is not None:
+                row.kind = body["kind"]
+            if "description" in body and body["description"] is not None:
+                row.description = body["description"]
+            if "generator" in body and body["generator"] is not None:
+                row.generator = body["generator"]
+            row.updated_at = now
+            session.add(row)
+            session.commit()
+            session.refresh(row)
+            return self._source_dict(row)
+
+    def delete_data_source(self, source_id: str) -> bool:
+        with self._lock, self._session() as session:
+            row = session.get(DataSourceRecord, source_id)
+            if row is None:
+                return False
+            session.delete(row)
             session.commit()
             return True

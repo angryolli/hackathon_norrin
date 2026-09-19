@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 
 from app.ingestion.loader import DetectedSchema
-from app.models.schemas import ProfileArtifact, SensorProfile
+from app.models.schemas import FieldProfile, ProfileArtifact
 
 
 def _lag1(x: np.ndarray) -> float | None:
@@ -30,7 +30,7 @@ def _fft_peak(x: np.ndarray) -> float | None:
 
 
 def profile_frame(df: pd.DataFrame, schema: DetectedSchema, calibration_id: str) -> ProfileArtifact:
-    sensors: list[SensorProfile] = []
+    fields: list[FieldProfile] = []
     n = len(df)
     for col in schema.numeric_cols:
         s = pd.to_numeric(df[col], errors="coerce")
@@ -51,9 +51,9 @@ def profile_frame(df: pd.DataFrame, schema: DetectedSchema, calibration_id: str)
             stationarity_evidence = f"half-mean delta={d:.3f}, std={scale:.3f}"
         mean = float(x.mean()) if x.size else None
         std = float(x.std()) if x.size else None
-        sensors.append(
-            SensorProfile(
-                sensor_id=col,
+        fields.append(
+            FieldProfile(
+                field_id=col,
                 n=int(x.size),
                 mean=mean,
                 std=std,
@@ -76,4 +76,4 @@ def profile_frame(df: pd.DataFrame, schema: DetectedSchema, calibration_id: str)
                 ),
             )
         )
-    return ProfileArtifact(calibration_id=calibration_id, sensors=sensors)
+    return ProfileArtifact(calibration_id=calibration_id, fields=fields)

@@ -81,7 +81,7 @@ function tracePath(
   }
 }
 
-export function SensorChart({
+export function StreamChart({
   values,
   tick,
   className = "",

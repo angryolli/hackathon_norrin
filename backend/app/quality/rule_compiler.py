@@ -42,12 +42,12 @@ def _eval_rule(batch: pd.DataFrame, rule_id: str, rule: RuleSchema) -> QualityIt
             status="fail",
             evidence="column missing in batch",
             originating_rule_id=rule_id,
-            sensor_fault=False,
+            field_fault=False,
         )
     s = pd.to_numeric(batch[rule.column], errors="coerce").tail(rule.window)
     status = "pass"
     evidence = ""
-    sensor_fault = False
+    field_fault = False
     if rule.condition == "gt":
         hit = bool((s > rule.threshold).any())
         status = "fail" if hit else "pass"
@@ -65,13 +65,13 @@ def _eval_rule(batch: pd.DataFrame, rule_id: str, rule: RuleSchema) -> QualityIt
         frozen = float((abs(x[1:] - x[:-1]) < 1e-9).mean()) if len(x) > 3 else 0
         hit = frozen >= rule.threshold
         status = "fail" if hit else "pass"
-        sensor_fault = hit
+        field_fault = hit
         evidence = f"frozen_frac={frozen:.3f} threshold={rule.threshold}"
     elif rule.condition == "missing_rate":
         miss = float(s.isna().mean())
         hit = miss >= rule.threshold
         status = "fail" if hit else "pass"
-        sensor_fault = hit
+        field_fault = hit
         evidence = f"missing={miss:.3f} threshold={rule.threshold}"
     if status == "fail" and rule.severity == "warn":
         status = "warn"
@@ -79,7 +79,7 @@ def _eval_rule(batch: pd.DataFrame, rule_id: str, rule: RuleSchema) -> QualityIt
         name=f"custom:{rule.column}:{rule.condition}",
         status=status,
         evidence=evidence,
-        affected_sensors=[rule.column],
+        affected_fields=[rule.column],
         originating_rule_id=rule_id,
-        sensor_fault=sensor_fault,
+        field_fault=field_fault,
     )

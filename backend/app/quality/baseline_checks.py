@@ -16,7 +16,7 @@ def run_quality(
 ) -> QualityReport:
     from app.quality.rule_compiler import run_custom_rules
 
-    stats = {p.sensor_id: p for p in profile.sensors}
+    stats = {p.field_id: p for p in profile.fields}
     checks: list[QualityItem] = []
     exclusion: list[str] = []
 
@@ -50,8 +50,8 @@ def run_quality(
             name="completeness",
             status="fail" if missing_hit else "pass",
             evidence=f"missing>5% on {missing_hit}" if missing_hit else "missing rates within 5%",
-            affected_sensors=missing_hit,
-            sensor_fault=bool(missing_hit),
+            affected_fields=missing_hit,
+            field_fault=bool(missing_hit),
         )
     )
     checks.append(
@@ -59,12 +59,12 @@ def run_quality(
             name="validity_stuck",
             status="fail" if stuck_hit else "pass",
             evidence=(
-                f"near-zero rolling delta on {stuck_hit} — sensor/data fault, exclude from process drift"
+                f"near-zero rolling delta on {stuck_hit} — data-source field fault, exclude from process drift"
                 if stuck_hit
-                else "no stuck sensors"
+                else "no stuck fields"
             ),
-            affected_sensors=stuck_hit,
-            sensor_fault=bool(stuck_hit),
+            affected_fields=stuck_hit,
+            field_fault=bool(stuck_hit),
         )
     )
     checks.append(
@@ -72,8 +72,8 @@ def run_quality(
             name="validity_range",
             status="fail" if range_hit else "pass",
             evidence=f"batch mean >6σ from calibration on {range_hit}" if range_hit else "in-range vs calibration",
-            affected_sensors=range_hit,
-            sensor_fault=bool(range_hit),
+            affected_fields=range_hit,
+            field_fault=bool(range_hit),
         )
     )
 
@@ -91,8 +91,8 @@ def run_quality(
             name="timeliness",
             status=ts_status,
             evidence=ts_evidence,
-            affected_sensors=[],
-            sensor_fault=False,
+            affected_fields=[],
+            field_fault=False,
         )
     )
     checks.append(
@@ -100,7 +100,7 @@ def run_quality(
             name="consistency",
             status="pass",
             evidence="schema unchanged vs calibration numeric set",
-            affected_sensors=[],
+            affected_fields=[],
         )
     )
 
@@ -108,13 +108,13 @@ def run_quality(
         checks.extend(run_custom_rules(batch, custom))
 
     for c in checks:
-        if c.sensor_fault:
-            exclusion.extend(c.affected_sensors)
+        if c.field_fault:
+            exclusion.extend(c.affected_fields)
     exclusion = list(dict.fromkeys(exclusion))
     return QualityReport(
         calibration_id=calibration_id,
         batch_id=batch_id,
         checks=checks[:40],
         exclusion_list=exclusion,
-        data_trusted=not any(c.status == "fail" and c.sensor_fault for c in checks),
+        data_trusted=not any(c.status == "fail" and c.field_fault for c in checks),
     )

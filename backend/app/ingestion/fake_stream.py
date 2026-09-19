@@ -19,6 +19,7 @@ def _industrial_columns() -> list[str]:
 @dataclass
 class RollingSource:
     dataset_id: str = "industrial_stream"
+    generator: str = "industrial"
     tick: int = 0
     live: deque[dict] = field(default_factory=lambda: deque(maxlen=LIVE_BUFFER))
     lock: Lock = field(default_factory=Lock)
@@ -26,9 +27,15 @@ class RollingSource:
     last_values: dict[str, float] = field(default_factory=dict)
     frozen: dict[str, float] = field(default_factory=dict)
 
-    def reset(self, dataset_id: str) -> None:
+    def reset(self, dataset_id: str, generator: str | None = None) -> None:
         with self.lock:
             self.dataset_id = dataset_id
+            if generator:
+                self.generator = generator
+            elif dataset_id == "expenses":
+                self.generator = "expenses"
+            else:
+                self.generator = "industrial"
             self.tick = 0
             self.live.clear()
             self.last_values.clear()
@@ -93,7 +100,7 @@ class RollingSource:
 
     def make_row(self, t: int, *, live: bool = True) -> dict:
         fault = 1 if live and t >= 90 else 0
-        if self.dataset_id == "expenses":
+        if self.generator == "expenses":
             return self._row_expenses(t, fault, live=live)
         return self._row_industrial(t, fault, live=live)
 
@@ -112,16 +119,25 @@ class RollingSource:
         self.frozen = frozen
         return pd.DataFrame(rows)
 
-    def seed_calibration_csv(self) -> None:
+    def seed_calibration_csv(
+        self,
+        train_path: str | None = None,
+        live_path: str | None = None,
+    ) -> None:
+        from pathlib import Path
+
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         train = self.generate_frame(500, start=0, fault_free=True)
         test = self.generate_frame(250, start=0, fault_free=False)
-        if self.dataset_id == "expenses":
-            train.to_csv(DATA_DIR / "second_domain.csv", index=False)
-            test.to_csv(DATA_DIR / "second_domain_live.csv", index=False)
-        else:
-            train.to_csv(DATA_DIR / "train.csv", index=False)
-            test.to_csv(DATA_DIR / "test.csv", index=False)
+        train_file = Path(train_path) if train_path else DATA_DIR / (
+            "second_domain.csv" if self.generator == "expenses" else "train.csv"
+        )
+        live_file = Path(live_path) if live_path else DATA_DIR / (
+            "second_domain_live.csv" if self.generator == "expenses" else "test.csv"
+        )
+        train_file.parent.mkdir(parents=True, exist_ok=True)
+        train.to_csv(train_file, index=False)
+        test.to_csv(live_file, index=False)
 
     def emit(self) -> None:
         with self.lock:

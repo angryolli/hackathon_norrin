@@ -25,7 +25,7 @@ type EventRow = {
   override?: { classification?: string; note?: string };
   ranking?: {
     confidence: number;
-    ranked: { sensor: string; contribution_score: number; evidence: string }[];
+    ranked: { field: string; contribution_score: number; evidence: string }[];
   };
 };
 
@@ -114,8 +114,8 @@ export function DiagnosisView() {
               <div className="space-y-3">
                 <ol className="list-decimal space-y-1 pl-4 font-mono text-xs">
                   {(ev.ranking?.ranked ?? []).map((row) => (
-                    <li key={row.sensor}>
-                      {row.sensor} · {row.contribution_score.toFixed(3)} · {row.evidence}
+                    <li key={row.field}>
+                      {row.field} · {row.contribution_score.toFixed(3)} · {row.evidence}
                     </li>
                   ))}
                 </ol>

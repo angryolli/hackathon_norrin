@@ -50,14 +50,41 @@ class CalibrateRequest(BaseModel):
 class CalibrateResponse(BaseModel):
     calibration_id: str
     dataset_id: str
-    n_sensors: int
+    n_fields: int
     n_rows_used: int
     baseline_established: bool
     evidence: str
 
 
-class SensorProfile(BaseModel):
-    sensor_id: str
+class DataSource(BaseModel):
+    id: str
+    name: str
+    kind: Literal["process", "business", "other"] = "process"
+    description: str = ""
+    generator: Literal["industrial", "expenses"] = "industrial"
+    train_path: str = ""
+    live_path: str = ""
+    created_at: str = ""
+    updated_at: str = ""
+    active: bool = False
+
+
+class DataSourceCreate(BaseModel):
+    name: str
+    kind: Literal["process", "business", "other"] = "process"
+    description: str = ""
+    generator: Literal["industrial", "expenses"] | None = None
+
+
+class DataSourceUpdate(BaseModel):
+    name: str | None = None
+    kind: Literal["process", "business", "other"] | None = None
+    description: str | None = None
+    generator: Literal["industrial", "expenses"] | None = None
+
+
+class FieldProfile(BaseModel):
+    field_id: str
     n: int
     mean: float | None = None
     std: float | None = None
@@ -77,7 +104,7 @@ class SensorProfile(BaseModel):
 
 class ProfileArtifact(SizedArtifact):
     calibration_id: str
-    sensors: list[SensorProfile] = Field(default_factory=list, max_length=80)
+    fields: list[FieldProfile] = Field(default_factory=list, max_length=80)
 
 
 class CorrelationPair(BaseModel):
@@ -103,7 +130,7 @@ class CorrelationArtifact(SizedArtifact):
 
 
 class StructuralRole(BaseModel):
-    sensor_id: str
+    field_id: str
     role: RoleKind
     quantization_score: float
     bounded_range_score: float
@@ -146,9 +173,9 @@ class QualityItem(BaseModel):
     name: str
     status: Status
     evidence: str
-    affected_sensors: list[str] = Field(default_factory=list, max_length=20)
+    affected_fields: list[str] = Field(default_factory=list, max_length=20)
     originating_rule_id: str = "baseline"
-    sensor_fault: bool = False
+    field_fault: bool = False
 
 
 class QualityReport(SizedArtifact):
@@ -166,7 +193,7 @@ class DriftScoreRequest(BaseModel):
 
 
 class Contribution(BaseModel):
-    sensor_id: str
+    field_id: str
     contribution_score: float
     evidence: str
 
@@ -223,8 +250,8 @@ class DecisionLogPage(BaseModel):
     total: int = 0
 
 
-class SensorCard(BaseModel):
-    sensor_id: str
+class FieldCard(BaseModel):
+    field_id: str
     sparkline: list[float] = Field(default_factory=list, max_length=SPARKLINE_POINTS)
     status: Chip
     contribution: float = 0.0
@@ -238,7 +265,7 @@ class MonitorSnapshot(BaseModel):
     t2_series: list[float] = Field(default_factory=list, max_length=60)
     control_limit: float = 0.0
     live_boundary: int = 0
-    sensors: list[SensorCard] = Field(default_factory=list, max_length=40)
+    fields: list[FieldCard] = Field(default_factory=list, max_length=40)
     exclusion_list: list[str] = Field(default_factory=list, max_length=20)
     latest_event_id: str | None = None
     evidence: str = "Monitor snapshot is aggregated windows, not raw row dumps."

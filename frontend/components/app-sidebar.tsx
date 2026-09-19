@@ -4,8 +4,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
-  Activity,
   ChevronsLeft,
+  Database,
   Gauge,
   MessageSquare,
   PanelLeft,
@@ -14,12 +14,12 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import type { RuntimeConfig } from "@/lib/browser-api";
+import { browserGet, type DataSource, type RuntimeConfig } from "@/lib/browser-api";
 
 const NAV = [
   { href: "/", label: "System Monitor", icon: Gauge },
   { href: "/agent", label: "Agent", icon: MessageSquare },
-  { href: "/sensors", label: "Sensors", icon: Activity },
+  { href: "/data", label: "Data", icon: Database },
 ];
 
 export function AppSidebar() {
@@ -28,6 +28,7 @@ export function AppSidebar() {
   const [collapsed, setCollapsed] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [cfg, setCfg] = useState<RuntimeConfig | null>(null);
+  const [sources, setSources] = useState<DataSource[]>([]);
 
   useEffect(() => {
     setMounted(true);
@@ -48,6 +49,11 @@ export function AppSidebar() {
         baseline_established: data.baseline_established,
         no_egress: data.node?.noEgress ?? data.no_egress,
       });
+      try {
+        setSources(await browserGet<DataSource[]>("/data-sources"));
+      } catch {
+        setSources([]);
+      }
     } catch {
       setCfg(null);
     }
@@ -189,15 +195,21 @@ export function AppSidebar() {
             </div>
             <div className="space-y-4 text-sm">
               <label className="block space-y-1">
-                <span className="text-xs text-muted-foreground">Dataset</span>
+                <span className="text-xs text-muted-foreground">Active data source</span>
                 <select
                   className="h-8 w-full rounded-md border border-input bg-background px-2 font-mono text-xs"
                   value={cfg?.dataset_id ?? "industrial_stream"}
                   onChange={(e) => void setDataset(e.target.value)}
                 >
-                  {(cfg?.datasets ?? ["industrial_stream", "expenses"]).map((id) => (
-                    <option key={id} value={id}>
-                      {id}
+                  {(sources.length
+                    ? sources
+                    : (cfg?.datasets ?? ["industrial_stream", "expenses"]).map((id) => ({
+                        id,
+                        name: id,
+                      }))
+                  ).map((src) => (
+                    <option key={src.id} value={src.id}>
+                      {src.name}
                     </option>
                   ))}
                 </select>

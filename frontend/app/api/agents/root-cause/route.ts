@@ -12,7 +12,7 @@ export async function POST(request: Request) {
     const result = await agent.generate({
       prompt: critique
         ? `Challenge the diagnosis for event ${event_id} using ranking evidence.`
-        : `Narrate the deterministic ranking for event ${event_id}. Do not reorder sensors.`,
+        : `Narrate the deterministic ranking for event ${event_id}. Do not reorder fields.`,
     });
     await postDecisionLog({
       type: "diagnosis",

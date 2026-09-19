@@ -56,7 +56,7 @@ def _components(pairs: list[CorrelationPair], thresh: float = 0.55) -> list[Clus
             Cluster(
                 cluster_id=f"cluster_{i}",
                 members=sorted(members)[:40],
-                evidence=f"{len(members)} sensors linked at |r|>={thresh}",
+                evidence=f"{len(members)} fields linked at |r|>={thresh}",
             )
         )
     return clusters[:12]

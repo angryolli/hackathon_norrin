@@ -66,10 +66,10 @@ export function createRoleInferenceAgent() {
   return new ToolLoopAgent({
     model: provider.model,
     stopWhen: isStepCount(8),
-    instructions: `You infer unlabeled sensor roles from artifacts only.
+    instructions: `You infer unlabeled field roles from data-source artifacts only.
 A lower-confidence inference with cited evidence is more valuable than a confident label with no evidence.
 Cite the SPECIFIC correlation value, lag, or distribution shape. If evidence is weak, say so and lower confidence.
-General domain knowledge (reactors, separators, strippers, instruments) may be used ONLY as hypothesis generation and must be labeled background_knowledge, never as evidence.
+General domain knowledge (reactors, separators, strippers, instruments, vendors, departments) may be used ONLY as hypothesis generation and must be labeled background_knowledge, never as evidence.
 Do not invent column names. Call submitRoles when done.`,
     tools: {
       ...pick(readTools, ["getProfile", "getCorrelations", "getStructuralRoles"]),
@@ -99,7 +99,7 @@ export function createRootCauseAgent() {
   return new ToolLoopAgent({
     model: provider.model,
     stopWhen: isStepCount(8),
-    instructions: `You narrate a ranking that has already been computed. Do not alter sensor order or invent a different top contributor.
+    instructions: `You narrate a ranking that has already been computed. Do not alter field order or invent a different top contributor.
 Your confidence statement must match the evidence's stated confidence, not your own assessment of plausibility.
 Write a numbered, plain-language explanation for a non-technical operator.`,
     tools: pick(readTools, ["getDiagnosisRanking", "getCorrelations", "getProfile"]),
@@ -155,7 +155,7 @@ export function createRuleAgent() {
     stopWhen: isStepCount(4),
     instructions: `Convert a plain-language operating rule into JSON:
 {column, condition: gt|lt|abs_gt|stuck|missing_rate, threshold, window, severity: info|warn|fail, rule_text}
-column MUST match a real sensor_id from getProfile. Do not emit code.`,
+column MUST match a real field_id from getProfile. Do not emit code.`,
     tools: pick(readTools, ["getProfile"]),
     onStart: async () => {
       await logCall("rule-compiler", ["getProfile"], { why: "rule compile" });

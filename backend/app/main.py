@@ -18,6 +18,9 @@ from app.models.schemas import (
     CompileRuleResponse,
     ConfigUpdate,
     CorrelationArtifact,
+    DataSource,
+    DataSourceCreate,
+    DataSourceUpdate,
     DecisionAppend,
     DecisionLogPage,
     DriftArtifact,
@@ -86,6 +89,37 @@ def post_config(body: ConfigUpdate) -> RuntimeConfig:
         raise HTTPException(400, str(exc)) from exc
 
 
+@app.get("/data-sources", response_model=list[DataSource])
+def data_sources_list() -> list[DataSource]:
+    return STATE.list_data_sources()
+
+
+@app.post("/data-sources", response_model=DataSource)
+def data_sources_create(body: DataSourceCreate) -> DataSource:
+    if not body.name.strip():
+        raise HTTPException(400, "name is required")
+    return STATE.add_data_source(body)
+
+
+@app.put("/data-sources/{source_id}", response_model=DataSource)
+def data_sources_update(source_id: str, body: DataSourceUpdate) -> DataSource:
+    try:
+        return STATE.patch_data_source(source_id, body)
+    except KeyError as exc:
+        raise HTTPException(404, "unknown data source") from exc
+
+
+@app.delete("/data-sources/{source_id}")
+def data_sources_delete(source_id: str) -> dict:
+    try:
+        STATE.remove_data_source(source_id)
+    except KeyError as exc:
+        raise HTTPException(404, "unknown data source") from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True}
+
+
 @app.post("/calibrate", response_model=CalibrateResponse)
 def calibrate(body: CalibrateRequest | None = None) -> CalibrateResponse:
     if body and body.dataset_id:
@@ -93,10 +127,10 @@ def calibrate(body: CalibrateRequest | None = None) -> CalibrateResponse:
         return CalibrateResponse(
             calibration_id=STATE.calibration_id or "",
             dataset_id=STATE.dataset_id,
-            n_sensors=len(STATE.schema.numeric_cols) if STATE.schema else 0,
+            n_fields=len(STATE.schema.numeric_cols) if STATE.schema else 0,
             n_rows_used=0,
             baseline_established=STATE.model is not None,
-            evidence="recalibrated after dataset switch",
+            evidence="recalibrated after data source switch",
         )
     return STATE.calibrate()
 

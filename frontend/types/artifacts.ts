@@ -2,8 +2,8 @@ import { z } from "zod";
 
 // Mirrors backend/app/models/schemas.py — keep in sync by hand.
 
-export const sensorProfileSchema = z.object({
-  sensor_id: z.string(),
+export const fieldProfileSchema = z.object({
+  field_id: z.string(),
   n: z.number(),
   mean: z.number().nullable(),
   std: z.number().nullable(),
@@ -23,7 +23,7 @@ export const sensorProfileSchema = z.object({
 
 export const profileArtifactSchema = z.object({
   calibration_id: z.string(),
-  sensors: z.array(sensorProfileSchema).max(80),
+  fields: z.array(fieldProfileSchema).max(80),
 });
 
 export const correlationPairSchema = z.object({
@@ -49,7 +49,7 @@ export const correlationArtifactSchema = z.object({
 });
 
 export const structuralRoleSchema = z.object({
-  sensor_id: z.string(),
+  field_id: z.string(),
   role: z.enum(["measured", "actuator", "ambiguous"]),
   quantization_score: z.number(),
   bounded_range_score: z.number(),
@@ -72,7 +72,7 @@ export const ruleSchema = z.object({
 });
 
 export const rankingRowSchema = z.object({
-  sensor: z.string(),
+  field: z.string(),
   contribution_score: z.number(),
   correlation_evidence: z.string(),
   lag_evidence: z.string(),
@@ -90,7 +90,7 @@ export const rankingArtifactSchema = z.object({
 export const roleInferenceSchema = z.object({
   items: z.array(
     z.object({
-      sensor_id: z.string(),
+      field_id: z.string(),
       hypothesis: z.string(),
       evidence_refs: z.array(z.string()),
       confidence: z.number().min(0).max(1),

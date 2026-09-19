@@ -6,7 +6,7 @@ export async function POST() {
     const agent = createRoleInferenceAgent();
     const result = await agent.generate({
       prompt:
-        "Infer a functional identity hypothesis for each unlabeled sensor using tools. Submit via submitRoles.",
+        "Infer a functional identity hypothesis for each unlabeled field using tools. Submit via submitRoles.",
     });
     return NextResponse.json({ text: result.text });
   } catch (err) {

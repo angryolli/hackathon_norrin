@@ -13,20 +13,20 @@ def rank_event(
         partners = [
             p
             for p in corr.pairs
-            if c.sensor_id in (p.a, p.b)
+            if c.field_id in (p.a, p.b)
         ]
         top = partners[0] if partners else None
         other = None
         lag = None
         if top:
-            other = top.b if top.a == c.sensor_id else top.a
+            other = top.b if top.a == c.field_id else top.a
             lag = top.best_lag
         ranked.append(
             {
-                "sensor": c.sensor_id,
+                "field": c.field_id,
                 "contribution_score": c.contribution_score,
                 "correlation_evidence": (
-                    f"{c.sensor_id} vs {other} pearson={top.pearson:.3f}"
+                    f"{c.field_id} vs {other} pearson={top.pearson:.3f}"
                     if top and other
                     else "no strong pair in top-k graph"
                 ),

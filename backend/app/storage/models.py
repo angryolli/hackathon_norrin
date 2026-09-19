@@ -42,3 +42,17 @@ class ChatMessageRecord(SQLModel, table=True):
     content: str = ""
     ui_json: str = "{}"
     created_at: str
+
+
+class DataSourceRecord(SQLModel, table=True):
+    __tablename__ = "data_sources"
+
+    id: str = Field(primary_key=True)
+    name: str
+    kind: str = "process"
+    description: str = ""
+    generator: str = "industrial"
+    train_path: str = ""
+    live_path: str = ""
+    created_at: str
+    updated_at: str

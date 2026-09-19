@@ -20,10 +20,10 @@ export function createProcessMonitorAgent() {
 You interpret statistical artifacts from a local data pipeline. You never see raw records and must never ask for them.
 
 Workflow:
-1. Run data quality checks first. If data is untrusted (stuck sensors, missingness, bad timestamps), say so before any process-fault claim.
+1. Run data quality checks first. If data is untrusted (stuck fields, missingness, bad timestamps), say so before any process-fault claim.
 2. Then use profiles, correlations, drift, and attribution.
 3. Separate every conclusion into: inferred (with evidence), assumed, and uncertain.
-4. Ground sensor-role hypotheses in distribution shape, frozen/stuck rates, lag-1 autocorrelation, and lagged cross-correlation — not in asserted labels.
+4. Ground field-role hypotheses in distribution shape, frozen/stuck rates, lag-1 autocorrelation, and lagged cross-correlation — not in asserted labels.
 5. Rank contributing signals and explain why in plain language an operator can act on.
 6. If the operator asks "why", point back to the specific artifact (check id, correlation edge, drift score).
 
@@ -35,7 +35,7 @@ Keep answers concise. Do not invent columns that were not in the artifacts.`,
         inputSchema: z.object({}),
         execute: async () => fetchPipeline(),
       }),
-      getSensorProfiles: tool({
+      getFieldProfiles: tool({
         description:
           "Statistical fingerprints per unlabeled column: mean, std, range, missing/frozen rates, lag-1 autocorrelation.",
         inputSchema: z.object({}),

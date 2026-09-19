@@ -35,8 +35,8 @@ export async function browserDelete(path: string): Promise<void> {
 
 export type Chip = "normal" | "drifting" | "stuck" | "out_of_range" | "excluded";
 
-export type SensorCard = {
-  sensor_id: string;
+export type FieldCard = {
+  field_id: string;
   sparkline: number[];
   status: Chip;
   contribution: number;
@@ -49,10 +49,23 @@ export type MonitorSnapshot = {
   tick: number;
   t2_series: number[];
   control_limit: number;
-  sensors: SensorCard[];
+  fields: FieldCard[];
   exclusion_list: string[];
   latest_event_id: string | null;
   evidence: string;
+};
+
+export type DataSource = {
+  id: string;
+  name: string;
+  kind: "process" | "business" | "other";
+  description: string;
+  generator: "industrial" | "expenses";
+  train_path: string;
+  live_path: string;
+  created_at: string;
+  updated_at: string;
+  active: boolean;
 };
 
 export type RuntimeConfig = {
