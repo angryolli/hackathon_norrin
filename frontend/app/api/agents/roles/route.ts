@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
-import { createRoleInferenceAgent } from "@/agents/operator";
+import { createUnderstandingAgent } from "@/agents/system";
 
 export async function POST() {
   try {
-    const agent = createRoleInferenceAgent();
+    const agent = createUnderstandingAgent();
     const result = await agent.generate({
       prompt:
-        "Infer a functional identity hypothesis for each unlabeled field using tools. Submit via submitRoles.",
+        "Infer a functional identity hypothesis for each unlabeled field from the diagnosis fingerprints.",
     });
     return NextResponse.json({ text: result.text });
   } catch (err) {

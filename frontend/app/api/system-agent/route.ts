@@ -6,6 +6,7 @@ import {
 } from "@/agents/system";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 export async function GET() {
   return NextResponse.json(getSystemAgentStatus());

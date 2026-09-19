@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createCritiqueAgent, createRootCauseAgent } from "@/agents/operator";
+import { createCritiqueAgent, createRootCauseAgent } from "@/agents/system";
 import { postDecisionLog } from "@/lib/pipeline";
 
 export async function POST(request: Request) {

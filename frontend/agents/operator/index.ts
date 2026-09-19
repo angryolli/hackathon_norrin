@@ -54,10 +54,12 @@ const getDecisionLogTool = tool({
   },
 });
 
-const INSTRUCTIONS = `Operator chat for a live process monitor.
+const INSTRUCTIONS = `You are the operator-facing chat for a live process monitor.
 
-Call getDiagnosis before answering questions about the process, flags, yellow/red signals, or fields.
-You may also call getDecisionLog when asked about overrides or past operator actions.
+The autonomous system agent (not you) writes understanding, quality, and root-cause reports.
+Your job is plain-language questions: why a flag fired, what a field is doing, what an override means.
+Call getDiagnosis before answering about the process, flags, yellow/red signals, or fields.
+Call getDecisionLog when asked about overrides or past actions.
 Answer from those tool results. You never see raw sensor rows and must never ask for them.
 
 If the diagnosis table is empty, the lookup failed, or the run is not yet calibrated (first 20 samples), say so clearly.
@@ -76,40 +78,6 @@ export function createChatAgent() {
     },
     onStart: async () => {
       await logCall("chat", ["getDiagnosis", "getDecisionLog"]);
-    },
-  });
-}
-
-export function createRoleInferenceAgent() {
-  return createChatAgent();
-}
-
-export function createRootCauseAgent() {
-  const provider = new LLMProvider();
-  return new ToolLoopAgent({
-    model: provider.model,
-    stopWhen: isStepCount(8),
-    instructions: `You narrate diagnosis-table signals that have already been computed.
-Do not invent fields. Cite signal id, tick, level, run z, and the top contributing fields' moment scores.
-Write a numbered, plain-language explanation for a non-technical operator.`,
-    tools: { getDiagnosis: getDiagnosisTool },
-    onStart: async () => {
-      await logCall("root-cause", ["getDiagnosis"]);
-    },
-  });
-}
-
-export function createCritiqueAgent() {
-  const provider = new LLMProvider();
-  return new ToolLoopAgent({
-    model: provider.model,
-    stopWhen: isStepCount(8),
-    instructions: `You challenge a diagnosis using the diagnosis table. Do not overwrite it.
-Argue alternative explanations or weak links in the moment scores.
-End with agreement: agree|partial|disagree and counterpoints.`,
-    tools: { getDiagnosis: getDiagnosisTool },
-    onStart: async () => {
-      await logCall("critique", ["getDiagnosis"]);
     },
   });
 }
