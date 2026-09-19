@@ -1,10 +1,5 @@
-import { AppShell } from "@/components/app-shell";
-import { AuditView } from "@/components/audit-view";
+import { redirect } from "next/navigation";
 
 export default function Page() {
-  return (
-    <AppShell>
-      <AuditView />
-    </AppShell>
-  );
+  redirect("/");
 }

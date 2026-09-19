@@ -6,7 +6,6 @@ import { useEffect, useState } from "react";
 import {
   Activity,
   ChevronsLeft,
-  FileText,
   MessageSquare,
   PanelLeft,
   Settings,
@@ -17,10 +16,9 @@ import { cn } from "@/lib/utils";
 import type { RuntimeConfig } from "@/lib/browser-api";
 
 const NAV = [
-  { href: "/", label: "Monitor", icon: Activity },
-  { href: "/diagnosis", label: "Diagnosis", icon: Stethoscope },
-  { href: "/chat", label: "Chat", icon: MessageSquare },
-  { href: "/audit", label: "Audit", icon: FileText },
+  { href: "/", label: "System Monitor", icon: Stethoscope },
+  { href: "/agent", label: "Agent", icon: MessageSquare },
+  { href: "/sensors", label: "Sensors", icon: Activity },
 ];
 
 export function AppSidebar() {

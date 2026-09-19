@@ -11,6 +11,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
+import { AuditView } from "@/components/audit-view";
 import { browserGet, browserPost } from "@/lib/browser-api";
 
 type EventRow = {
@@ -82,7 +83,9 @@ export function DiagnosisView() {
   }
 
   return (
-    <div className="space-y-3 p-4">
+    <div className="grid h-full min-h-0 gap-4 overflow-hidden p-4 lg:grid-cols-2">
+      <div className="min-h-0 space-y-3 overflow-y-auto">
+        <h2 className="text-sm font-medium">Flagged events</h2>
       {events.length === 0 && (
         <p className="text-sm text-muted-foreground">
           No flagged events yet. Wait for the live stream to drift.
@@ -133,7 +136,7 @@ export function DiagnosisView() {
                     size="sm"
                     variant="outline"
                     onClick={() =>
-                      router.push(`/chat?context=event_id=${ev.event_id}`)
+                      router.push(`/agent?context=event_id=${ev.event_id}`)
                     }
                   >
                     Question
@@ -163,6 +166,13 @@ export function DiagnosisView() {
           </CardContent>
         </Card>
       ))}
+      </div>
+      <div className="min-h-0 overflow-y-auto rounded-xl border border-border bg-card">
+        <div className="border-b border-border px-4 py-3">
+          <h2 className="text-sm font-medium">Decision log</h2>
+        </div>
+        <AuditView />
+      </div>
     </div>
   );
 }

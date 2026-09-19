@@ -10,6 +10,10 @@ from app.config import TICK_SECONDS
 from app.models.schemas import (
     CalibrateRequest,
     CalibrateResponse,
+    ChatCreateRequest,
+    ChatDetail,
+    ChatSaveRequest,
+    ChatSummary,
     CompileRuleRequest,
     CompileRuleResponse,
     ConfigUpdate,
@@ -181,3 +185,40 @@ def log_get(
 ) -> DecisionLogPage:
     entries, total = STATE.store.page(type, human_overridden)
     return DecisionLogPage(entries=entries, total=total)
+
+
+@app.get("/chats", response_model=list[ChatSummary])
+def chats_list() -> list[ChatSummary]:
+    return [ChatSummary(**row) for row in STATE.store.list_chats()]
+
+
+@app.post("/chats", response_model=ChatDetail)
+def chats_create(body: ChatCreateRequest | None = None) -> ChatDetail:
+    row = STATE.store.create_chat((body.title if body else "New chat"))
+    return ChatDetail(**row)
+
+
+@app.get("/chats/{chat_id}", response_model=ChatDetail)
+def chats_get(chat_id: str) -> ChatDetail:
+    row = STATE.store.get_chat(chat_id)
+    if row is None:
+        raise HTTPException(404, "unknown chat")
+    return ChatDetail(**row)
+
+
+@app.put("/chats/{chat_id}/messages", response_model=ChatSummary)
+def chats_save(chat_id: str, body: ChatSaveRequest) -> ChatSummary:
+    row = STATE.store.save_chat_messages(
+        chat_id,
+        [m.model_dump() for m in body.messages],
+    )
+    if row is None:
+        raise HTTPException(404, "unknown chat")
+    return ChatSummary(**row)
+
+
+@app.delete("/chats/{chat_id}")
+def chats_delete(chat_id: str) -> dict:
+    if not STATE.store.delete_chat(chat_id):
+        raise HTTPException(404, "unknown chat")
+    return {"ok": True}

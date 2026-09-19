@@ -35,31 +35,33 @@ export function MonitorView() {
   });
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-2 overflow-y-auto p-4">
-      {sensors.map((sensor) => (
-        <div
-          key={sensor.sensor_id}
-          className="w-full rounded-xl border border-border bg-card p-3"
-        >
-          <div className="flex items-center justify-between gap-2">
-            <span className="font-mono text-sm">{sensor.sensor_id}</span>
-            <div className="flex items-center gap-2">
-              <span className="font-mono text-[11px] text-muted-foreground">
-                contrib {sensor.contribution.toFixed(2)}
-              </span>
-              <StatusChip status={sensor.status} />
+    <div className="h-full min-h-0 overflow-y-auto p-4">
+      <div className="grid grid-cols-3 gap-2">
+        {sensors.map((sensor) => (
+          <div
+            key={sensor.sensor_id}
+            className="min-w-0 rounded-xl border border-border bg-card p-2"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-mono text-sm">{sensor.sensor_id}</span>
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="truncate font-mono text-[11px] text-muted-foreground">
+                  contrib {sensor.contribution.toFixed(2)}
+                </span>
+                <StatusChip status={sensor.status} />
+              </div>
+            </div>
+            <div className="mt-1 h-28">
+              <SensorChart
+                values={sensor.sparkline}
+                tick={snap?.tick}
+                className="h-28"
+                accent="rgb(82, 82, 91)"
+              />
             </div>
           </div>
-          <div className="mt-2 h-28">
-            <SensorChart
-              values={sensor.sparkline}
-              tick={snap?.tick}
-              className="h-28"
-              accent="rgb(82, 82, 91)"
-            />
-          </div>
-        </div>
-      ))}
+        ))}
+      </div>
     </div>
   );
 }

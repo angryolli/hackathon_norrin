@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -242,3 +242,28 @@ class MonitorSnapshot(BaseModel):
     exclusion_list: list[str] = Field(default_factory=list, max_length=20)
     latest_event_id: str | None = None
     evidence: str = "Monitor snapshot is aggregated windows, not raw row dumps."
+
+
+class ChatMessageBody(BaseModel):
+    id: str
+    role: str
+    parts: list[Any] = Field(default_factory=list)
+
+
+class ChatSaveRequest(BaseModel):
+    messages: list[ChatMessageBody]
+
+
+class ChatCreateRequest(BaseModel):
+    title: str = "New chat"
+
+
+class ChatSummary(BaseModel):
+    id: str
+    title: str
+    created_at: str
+    updated_at: str
+
+
+class ChatDetail(ChatSummary):
+    messages: list[Any] = Field(default_factory=list)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
@@ -11,7 +12,12 @@ from sqlmodel import Session, SQLModel, col, create_engine, select
 
 from app.config import ARTIFACT_DIR
 from app.models.schemas import DecisionAppend, DecisionEntry
-from app.storage.models import ArtifactRecord, DecisionLogRecord
+from app.storage.models import (
+    ArtifactRecord,
+    ChatConversationRecord,
+    ChatMessageRecord,
+    DecisionLogRecord,
+)
 
 DB_PATH = ARTIFACT_DIR / "monitor.sqlite"
 
@@ -110,3 +116,120 @@ class ArtifactStore:
             for row in rows
         ]
         return entries, int(total)
+
+    def list_chats(self) -> list[dict]:
+        with self._lock, self._session() as session:
+            rows = session.exec(
+                select(ChatConversationRecord).order_by(
+                    col(ChatConversationRecord.updated_at).desc()
+                )
+            ).all()
+            return [
+                {
+                    "id": row.id,
+                    "title": row.title,
+                    "created_at": row.created_at,
+                    "updated_at": row.updated_at,
+                }
+                for row in rows
+            ]
+
+    def create_chat(self, title: str = "New chat") -> dict:
+        now = datetime.now(timezone.utc).isoformat()
+        row = ChatConversationRecord(
+            id=uuid.uuid4().hex,
+            title=(title.strip() or "New chat")[:80],
+            created_at=now,
+            updated_at=now,
+        )
+        with self._lock, self._session() as session:
+            session.add(row)
+            session.commit()
+        return {
+            "id": row.id,
+            "title": row.title,
+            "created_at": row.created_at,
+            "updated_at": row.updated_at,
+            "messages": [],
+        }
+
+    def get_chat(self, chat_id: str) -> dict | None:
+        with self._lock, self._session() as session:
+            conv = session.get(ChatConversationRecord, chat_id)
+            if conv is None:
+                return None
+            rows = session.exec(
+                select(ChatMessageRecord)
+                .where(col(ChatMessageRecord.conversation_id) == chat_id)
+                .order_by(col(ChatMessageRecord.seq))
+            ).all()
+            messages = [json.loads(row.ui_json) for row in rows]
+            return {
+                "id": conv.id,
+                "title": conv.title,
+                "created_at": conv.created_at,
+                "updated_at": conv.updated_at,
+                "messages": messages,
+            }
+
+    def save_chat_messages(self, chat_id: str, messages: list[dict]) -> dict | None:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._lock, self._session() as session:
+            conv = session.get(ChatConversationRecord, chat_id)
+            if conv is None:
+                return None
+            existing = session.exec(
+                select(ChatMessageRecord).where(
+                    col(ChatMessageRecord.conversation_id) == chat_id
+                )
+            ).all()
+            for row in existing:
+                session.delete(row)
+            title = conv.title
+            for seq, msg in enumerate(messages):
+                parts = msg.get("parts") or []
+                texts = [
+                    str(p.get("text", ""))
+                    for p in parts
+                    if isinstance(p, dict) and p.get("type") == "text"
+                ]
+                content = "\n".join(t for t in texts if t)
+                if title in ("", "New chat") and msg.get("role") == "user" and content:
+                    title = content.strip().split("\n", 1)[0][:80]
+                mid = str(msg.get("id") or uuid.uuid4().hex)
+                session.add(
+                    ChatMessageRecord(
+                        id=f"{chat_id}:{mid}",
+                        conversation_id=chat_id,
+                        seq=seq,
+                        role=str(msg.get("role") or "user"),
+                        content=content,
+                        ui_json=json.dumps(msg),
+                        created_at=now,
+                    )
+                )
+            conv.title = title
+            conv.updated_at = now
+            session.commit()
+            return {
+                "id": conv.id,
+                "title": conv.title,
+                "created_at": conv.created_at,
+                "updated_at": conv.updated_at,
+            }
+
+    def delete_chat(self, chat_id: str) -> bool:
+        with self._lock, self._session() as session:
+            conv = session.get(ChatConversationRecord, chat_id)
+            if conv is None:
+                return False
+            rows = session.exec(
+                select(ChatMessageRecord).where(
+                    col(ChatMessageRecord.conversation_id) == chat_id
+                )
+            ).all()
+            for row in rows:
+                session.delete(row)
+            session.delete(conv)
+            session.commit()
+            return True

@@ -21,3 +21,24 @@ class DecisionLogRecord(SQLModel, table=True):
     payload: str
     evidence_ref: str = ""
     human_overridden: bool = Field(default=False, index=True)
+
+
+class ChatConversationRecord(SQLModel, table=True):
+    __tablename__ = "chat_conversations"
+
+    id: str = Field(primary_key=True)
+    title: str = ""
+    created_at: str
+    updated_at: str = Field(index=True)
+
+
+class ChatMessageRecord(SQLModel, table=True):
+    __tablename__ = "chat_messages"
+
+    id: str = Field(primary_key=True)
+    conversation_id: str = Field(index=True, foreign_key="chat_conversations.id")
+    seq: int
+    role: str
+    content: str = ""
+    ui_json: str = "{}"
+    created_at: str
