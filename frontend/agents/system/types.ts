@@ -13,6 +13,31 @@ export type SystemReport = {
   bytes: number;
 };
 
+export type FieldUnderstanding = {
+  field_id: string;
+  role: string;
+  hypothesis: string;
+  evidence: string;
+  confidence: number;
+  inferred: string;
+  assumed: string;
+  uncertain: string;
+};
+
+export type FieldQuality = {
+  field_id: string;
+  faulty: boolean;
+  issue: string;
+  adjective: string;
+  confidence: number;
+  summary: string;
+};
+
+export type SensorNote = {
+  understanding?: FieldUnderstanding;
+  quality?: FieldQuality;
+};
+
 export type DataFlowRecord = {
   model: string;
   host: string;
@@ -36,5 +61,6 @@ export type SystemAgentStatus = {
   quality: SystemReport | null;
   diagnosis: SystemReport | null;
   critique: SystemReport | null;
+  sensors: Record<string, SensorNote>;
   dataFlow: DataFlowRecord;
 };

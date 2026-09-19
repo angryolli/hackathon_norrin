@@ -42,6 +42,27 @@ export type DataFlowRecord = {
   swap: string;
 };
 
+export type SensorNote = {
+  understanding?: {
+    field_id: string;
+    role: string;
+    hypothesis: string;
+    evidence: string;
+    confidence: number;
+    inferred: string;
+    assumed: string;
+    uncertain: string;
+  };
+  quality?: {
+    field_id: string;
+    faulty: boolean;
+    issue: string;
+    adjective: string;
+    confidence: number;
+    summary: string;
+  };
+};
+
 export type SystemAgentStatus = {
   running: boolean;
   loop: "manual" | "continuous";
@@ -56,6 +77,7 @@ export type SystemAgentStatus = {
   quality: SystemReport | null;
   diagnosis: SystemReport | null;
   critique: SystemReport | null;
+  sensors: Record<string, SensorNote>;
   dataFlow: DataFlowRecord;
 };
 
@@ -73,6 +95,7 @@ export const IDLE_AGENT: SystemAgentStatus = {
   quality: null,
   diagnosis: null,
   critique: null,
+  sensors: {},
   dataFlow: {
     model: "—",
     host: "—",

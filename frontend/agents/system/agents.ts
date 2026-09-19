@@ -34,11 +34,11 @@ export function createUnderstandingAgent() {
     tools: {},
     instructions: `${SHARED}
 
-Write the sensor understanding report.
-For each field in the artifact, propose a role (measured / actuator / ambiguous or a cautious functional guess).
-Cite the statistical evidence (n, mean, sd, skew, kurtosis, surprise score).
-State confidence 0–1. Lower-confidence with evidence beats a confident label with none.
-End with a short note that the same unlabeled-column logic applies to non-sensor tables.`,
+Write a JSON object only (no markdown) with this shape:
+{"fields":[{"field_id":"exact id from the artifact","role":"measured|actuator|ambiguous","hypothesis":"cautious functional guess","evidence":"n/mean/sd/skew/kurtosis/score cited","confidence":0.0,"inferred":"...","assumed":"...","uncertain":"..."}]}
+One object per field in the artifact. field_id MUST copy the artifact exactly.
+Lower-confidence with evidence beats a confident label with none.
+Domain knowledge is a hypothesis aid, not a predetermined answer.`,
   });
 }
 
@@ -50,11 +50,12 @@ export function createQualityAgent() {
     tools: {},
     instructions: `${SHARED}
 
-Write the data-quality report from the artifact only.
-Cover completeness, validity, consistency, and timeliness as far as these fingerprints allow (n, sd≈0 frozen, extreme skew/kurtosis, not yet calibrated).
-Say explicitly what you cannot check because the compute plane did not send it (missing timestamps, unit labels).
-Separate "data cannot be trusted" from "process looks drifted".
-First line MUST be exactly: DATA_TRUSTED: yes   or   DATA_TRUSTED: no`,
+Write JSON only (no markdown) judging EACH FIELD's instrument/data quality. Do not classify process alarms or drift events.
+Look for frozen (sd near 0), too few samples, implausible moments, not yet calibrated. That is a broken or weak sensor, not a process fault.
+Shape:
+{"data_trusted":true,"fields":[{"field_id":"exact id from the artifact","faulty":false,"issue":"none|frozen|too_few_samples|implausible|uncalibrated","adjective":"Excellent|Good|Fair|Poor|Untrusted","confidence":0.0,"summary":"one sentence on this field only"}]}
+adjective is a quality scale, not an alarm. field_id MUST copy the artifact exactly.
+data_trusted is false only if the incoming data itself cannot be used.`,
   });
 }
 

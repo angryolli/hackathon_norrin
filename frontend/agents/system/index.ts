@@ -10,4 +10,4 @@ export {
   createRootCauseAgent,
   createUnderstandingAgent,
 } from "./agents";
-export type { DataFlowRecord, SystemReport, SystemStep } from "./types";
+export type { DataFlowRecord, FieldQuality, FieldUnderstanding, SensorNote, SystemReport, SystemStep } from "./types";

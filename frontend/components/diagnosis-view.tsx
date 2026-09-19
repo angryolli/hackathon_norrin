@@ -1,6 +1,6 @@
 "use client";
 
-import { Bot, Database, FileSearch, GitBranch, Pause, Shield } from "lucide-react";
+import { Bot, Database, GitBranch, Pause } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ChatMarkdown } from "@/components/chat-markdown";
@@ -16,7 +16,7 @@ import {
 import { eventsStreamUrl } from "@/lib/browser-api";
 import type { DiagnosisSnapshot } from "@/lib/pipeline";
 
-type Panel = "sources" | "understanding" | "quality" | "cause";
+type Panel = "sources" | "cause";
 
 export function DiagnosisView() {
   const [panel, setPanel] = useState<Panel>("sources");
@@ -73,7 +73,7 @@ export function DiagnosisView() {
       try {
         const res = await fetch("/api/system-agent");
         const data = (await res.json()) as SystemAgentStatus;
-        if (on) setSystemAgent(data);
+        if (on) setSystemAgent({ ...IDLE_AGENT, ...data, sensors: data.sensors ?? {} });
       } catch {
         /* ignore */
       }
@@ -91,7 +91,7 @@ export function DiagnosisView() {
       fetch("/api/system-agent")
         .then((r) => r.json())
         .then((data: SystemAgentStatus) => {
-          if (on) setSystemAgent(data);
+          if (on) setSystemAgent({ ...IDLE_AGENT, ...data, sensors: data.sensors ?? {} });
         })
         .catch(() => undefined);
     }, 800);
@@ -109,20 +109,14 @@ export function DiagnosisView() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ running: !systemAgent.running }),
       });
-      setSystemAgent((await res.json()) as SystemAgentStatus);
+      const data = (await res.json()) as SystemAgentStatus;
+      setSystemAgent({ ...IDLE_AGENT, ...data, sensors: data.sensors ?? {} });
     } catch {
       /* ignore */
     } finally {
       setSystemAgentBusy(false);
     }
   }
-
-  const nav: { id: Panel; label: string; icon: typeof Database }[] = [
-    { id: "sources", label: "Sources", icon: Database },
-    { id: "understanding", label: "Understanding", icon: FileSearch },
-    { id: "quality", label: "Quality", icon: Shield },
-    { id: "cause", label: "Root cause", icon: GitBranch },
-  ];
 
   return (
     <div className="flex h-full min-h-0">
@@ -134,30 +128,6 @@ export function DiagnosisView() {
         }
       >
         {panel === "sources" && <DataSourcesView />}
-        {panel === "understanding" && (
-          <ReportPane
-            title="Sensor understanding"
-            blurb="Inferred identity and role for unlabeled fields, grounded in moment evidence. Launch the system agent to generate this."
-            report={systemAgent.understanding}
-            running={systemAgent.running && systemAgent.step === "understanding"}
-          />
-        )}
-        {panel === "quality" && (
-          <ReportPane
-            title="Data quality"
-            blurb="Baseline trust in the incoming stream, kept separate from process drift. Launch the system agent to generate this."
-            report={systemAgent.quality}
-            running={systemAgent.running && systemAgent.step === "quality"}
-            badge={
-              systemAgent.dataTrusted == null
-                ? null
-                : systemAgent.dataTrusted
-                  ? "data trusted"
-                  : "data not trusted"
-            }
-            badgeTone={systemAgent.dataTrusted === false ? "bad" : "ok"}
-          />
-        )}
         {panel === "cause" && (
           <div className="mx-auto max-w-3xl space-y-6">
             <ReportPane
@@ -210,22 +180,15 @@ export function DiagnosisView() {
         </div>
         <nav className="flex flex-1 flex-col gap-1 overflow-y-auto p-2">
           <NavButton
-            item={nav[0]}
+            item={{ id: "sources", label: "Sources", icon: Database }}
             active={panel === "sources"}
             onClick={() => setPanel("sources")}
           />
-          <p className="px-2 pt-3 pb-1 text-[10px] tracking-wide text-muted-foreground uppercase">
-            Outputs
-          </p>
-          {nav.slice(1).map((item) => (
-            <NavButton
-              key={item.id}
-              item={item}
-              active={panel === item.id}
-              onClick={() => setPanel(item.id)}
-              warn={item.id === "quality" && systemAgent.dataTrusted === false}
-            />
-          ))}
+          <NavButton
+            item={{ id: "cause", label: "Root cause", icon: GitBranch }}
+            active={panel === "cause"}
+            onClick={() => setPanel("cause")}
+          />
         </nav>
         <div className="border-t border-border px-3 py-3 font-mono text-[10px] text-muted-foreground">
           {current

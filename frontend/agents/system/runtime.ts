@@ -28,6 +28,7 @@ function emptyStatus(): Omit<SystemAgentStatus, "dataFlow"> {
     quality: null,
     diagnosis: null,
     critique: null,
+    sensors: {},
   };
 }
 
@@ -43,7 +44,9 @@ function handle(): Handle {
 }
 
 function snapshot(): SystemAgentStatus {
-  return { ...handle().status, dataFlow: dataFlowRecord() };
+  const status = handle().status;
+  if (!status.sensors) status.sensors = {};
+  return { ...status, dataFlow: dataFlowRecord() };
 }
 
 export function getSystemAgentStatus(): SystemAgentStatus {
@@ -76,6 +79,13 @@ export function startSystemAgent(): SystemAgentStatus {
     setReport: (key, report: SystemReport) => {
       runtime.status[key] = report;
       runtime.status.lastBeatAt = new Date().toISOString();
+    },
+    mergeSensors: (patch) => {
+      const next = { ...(runtime.status.sensors ?? {}) };
+      for (const [id, note] of Object.entries(patch)) {
+        next[id] = { ...next[id], ...note };
+      }
+      runtime.status.sensors = next;
     },
   })
     .then(() => {

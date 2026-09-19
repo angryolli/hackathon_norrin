@@ -17,6 +17,8 @@ import {
 } from "@/lib/browser-api";
 import type { DiagnosisSignal, DiagnosisSnapshot } from "@/lib/pipeline";
 import { useSimulation } from "@/components/simulation-context";
+import { IDLE_AGENT, type SystemAgentStatus } from "@/components/monitor-panes";
+import { noteForStream, SourceModal } from "@/components/source-modal";
 import { cn } from "@/lib/utils";
 
 function sourceKey(sourceId: string, fieldId: string) {
@@ -81,6 +83,14 @@ export function DataSourcesView() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [signals, setSignals] = useState<DiagnosisSignal[]>([]);
+  const [agent, setAgent] = useState<SystemAgentStatus>(IDLE_AGENT);
+  const [openKey, setOpenKey] = useState<string | null>(null);
+  const [origin, setOrigin] = useState<{
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+  } | null>(null);
   const ticksRef = useRef({ tick: -1, demo: -1, dataset: "", playing: false, fields: "" });
   const { setPlaying } = useSimulation();
 
@@ -192,6 +202,40 @@ export function DataSourcesView() {
       source?.close();
     };
   }, []);
+
+  useEffect(() => {
+    let on = true;
+    async function pull() {
+      try {
+        const res = await fetch("/api/system-agent");
+        const data = (await res.json()) as SystemAgentStatus;
+        if (on) setAgent({ ...IDLE_AGENT, ...data, sensors: data.sensors ?? {} });
+      } catch {
+        /* ignore */
+      }
+    }
+    void pull();
+    return () => {
+      on = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!openKey) return;
+    let on = true;
+    const id = window.setInterval(() => {
+      fetch("/api/system-agent")
+        .then((r) => r.json())
+        .then((data: SystemAgentStatus) => {
+          if (on) setAgent({ ...IDLE_AGENT, ...data, sensors: data.sensors ?? {} });
+        })
+        .catch(() => undefined);
+    }, 2000);
+    return () => {
+      on = false;
+      window.clearInterval(id);
+    };
+  }, [openKey]);
 
   async function loadSources() {
     try {
@@ -430,6 +474,37 @@ export function DataSourcesView() {
     );
   }, [configuredSources, streams]);
 
+  const openStream = useMemo((): FieldCard | null => {
+    if (!openKey) return null;
+    const live = streams.find(
+      (stream) => sourceKey(stream.source_id ?? "", stream.field_id) === openKey,
+    );
+    if (live) return live;
+    const idle = idleFields.find((field) => field.key === openKey);
+    if (!idle) return null;
+    return {
+      field_id: idle.field_id,
+      sparkline: [],
+      status: "normal",
+      contribution: 0,
+      evidence: "",
+      source_file: idle.file_name,
+      source_id: idle.source.id,
+    };
+  }, [idleFields, openKey, streams]);
+
+  function openSource(key: string, node: HTMLElement) {
+    if (deleting) return;
+    const rect = node.getBoundingClientRect();
+    setOrigin({
+      left: rect.left,
+      top: rect.top,
+      width: rect.width,
+      height: rect.height,
+    });
+    setOpenKey(key);
+  }
+
   const allFieldKeys = useMemo(() => {
     const keys = streams.map((stream) => sourceKey(stream.source_id ?? "", stream.field_id));
     for (const field of idleFields) keys.push(field.key);
@@ -535,6 +610,7 @@ export function DataSourcesView() {
               deleting={deleting}
               selected={selected.has(field.key)}
               onSelect={() => toggleSelected(field.key)}
+              onOpen={(node) => openSource(field.key, node)}
             />
           ))}
           {streams.map((stream) => {
@@ -548,6 +624,7 @@ export function DataSourcesView() {
                 deleting={deleting}
                 selected={selected.has(key)}
                 onSelect={() => toggleSelected(key)}
+                onOpen={(node) => openSource(key, node)}
               />
             );
           })}
@@ -776,6 +853,19 @@ export function DataSourcesView() {
           </div>
         </div>
       )}
+      {openKey && origin && openStream && (
+        <SourceModal
+          stream={openStream}
+          origin={origin}
+          tick={snap?.tick}
+          marks={marksForStream(openStream, snap?.tick, signals)}
+          note={noteForStream(agent.sensors, openStream)}
+          onClose={() => {
+            setOpenKey(null);
+            setOrigin(null);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -789,6 +879,7 @@ const StreamTile = memo(function StreamTile({
   deleting,
   selected,
   onSelect,
+  onOpen,
 }: {
   stream: FieldCard;
   tick?: number;
@@ -796,16 +887,25 @@ const StreamTile = memo(function StreamTile({
   deleting?: boolean;
   selected?: boolean;
   onSelect?: () => void;
+  onOpen?: (node: HTMLElement) => void;
 }) {
   return (
     <div
+      role={deleting ? undefined : "button"}
       className={cn(
         STREAM_CARD,
         "relative",
+        !deleting && "cursor-pointer",
         selected && "border-blue-500 ring-2 ring-blue-500",
       )}
       style={{ contentVisibility: "auto", containIntrinsicSize: "auto 13rem" }}
-      onClick={deleting ? onSelect : undefined}
+      onClick={(event) => {
+        if (deleting) {
+          onSelect?.();
+          return;
+        }
+        onOpen?.(event.currentTarget);
+      }}
     >
       {deleting && (
         <button

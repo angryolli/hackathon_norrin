@@ -31,8 +31,8 @@ Demo scheduler: launch runs **one cycle** then stops (no token burn). Continuous
 
 | Expected output | Owner | Where you look |
 |---|---|---|
-| 1 Sensor understanding report | System agent | System Monitor → Understanding |
-| 2 Data quality checks | System agent | System Monitor → Quality |
+| 1 Sensor understanding report | System agent | System Monitor → click a source |
+| 2 Data quality checks | System agent | System Monitor → click a source (that field only) |
 | 3 Drift / anomaly | Compute plane + system narration | Reports & Logs → Drift |
 | 4 Root-cause diagnosis | System agent (+ critique) | System Monitor → Root cause |
 | 5 Human review | Operator (controls) | Reports & Logs → Review; questions also `/agent` |

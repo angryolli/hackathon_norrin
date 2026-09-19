@@ -9,7 +9,8 @@ import {
   payloadHash,
   runSystemPrompt,
 } from "./agents";
-import type { DataFlowRecord, SystemReport, SystemStep } from "./types";
+import { parseQualityFields, parseUnderstandingFields } from "./parse";
+import type { DataFlowRecord, SensorNote, SystemReport, SystemStep } from "./types";
 
 export type CycleSink = {
   aborted: () => boolean;
@@ -21,6 +22,7 @@ export type CycleSink = {
     key: "understanding" | "quality" | "diagnosis" | "critique",
     report: SystemReport,
   ) => void;
+  mergeSensors: (patch: Record<string, SensorNote>) => void;
 };
 
 function hostOf(url: string) {
@@ -87,6 +89,12 @@ export async function runSystemCycle(sink: CycleSink) {
   );
   if (sink.aborted()) return;
   sink.setReport("understanding", report(understanding, bytes));
+  const understood = parseUnderstandingFields(understanding);
+  const understoodPatch: Record<string, SensorNote> = {};
+  for (const [id, row] of Object.entries(understood)) {
+    understoodPatch[id] = { understanding: row };
+  }
+  sink.mergeSensors(understoodPatch);
   await postDecisionLog({
     type: "inference",
     payload: { step: "understanding", hash: payloadHash(understanding) },
@@ -104,7 +112,14 @@ export async function runSystemCycle(sink: CycleSink) {
   );
   if (sink.aborted()) return;
   sink.setReport("quality", report(quality, bytes));
-  const trusted = trustedFrom(quality);
+  const parsedQuality = parseQualityFields(quality);
+  const qualityPatch: Record<string, SensorNote> = {};
+  for (const [id, row] of Object.entries(parsedQuality.fields)) {
+    qualityPatch[id] = { quality: row };
+  }
+  sink.mergeSensors(qualityPatch);
+  const trusted =
+    parsedQuality.dataTrusted ?? trustedFrom(quality) ?? null;
   sink.setDataTrusted(trusted);
   await postDecisionLog({
     type: "flag",
