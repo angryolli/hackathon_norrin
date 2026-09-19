@@ -4,7 +4,8 @@ import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, getToolName, isToolUIPart, type UIMessage } from "ai";
 import { ArrowUp, Check, Loader2, Plus, Trash2, Wrench } from "lucide-react";
 import { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import Link from "next/link";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { ChatMarkdown } from "@/components/chat-markdown";
 import {
@@ -71,7 +72,15 @@ function serializeMessages(messages: UIMessage[]) {
   );
 }
 
+function chatIdFromPath(pathname: string) {
+  const match = pathname.match(/^\/agent\/chat\/([^/]+)/);
+  return match?.[1] ?? null;
+}
+
 export function ChatView() {
+  const pathname = usePathname();
+  const router = useRouter();
+  const routeId = chatIdFromPath(pathname);
   const [chats, setChats] = useState<ChatSummary[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [threadKey, setThreadKey] = useState("draft");
@@ -89,22 +98,46 @@ export function ChatView() {
     void refreshChats();
   }, []);
 
-  async function openChat(id: string) {
-    const detail = await browserGet<ChatDetail>(`/chats/${id}`);
-    setActiveId(id);
-    setInitialMessages(toUiMessages(detail.messages));
-    setThreadKey(id);
-  }
+  useEffect(() => {
+    if (!routeId) {
+      if (activeId) {
+        setActiveId(null);
+        setInitialMessages([]);
+        setThreadKey(`draft-${Date.now()}`);
+      }
+      return;
+    }
+    if (routeId === activeId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const detail = await browserGet<ChatDetail>(`/chats/${routeId}`);
+        if (cancelled) return;
+        setActiveId(routeId);
+        setInitialMessages(toUiMessages(detail.messages));
+        setThreadKey(routeId);
+      } catch {
+        if (!cancelled) router.replace("/agent");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [routeId, activeId, router]);
 
   function newChat() {
-    setActiveId(null);
-    setInitialMessages([]);
-    setThreadKey(`draft-${Date.now()}`);
+    if (!routeId) {
+      setActiveId(null);
+      setInitialMessages([]);
+      setThreadKey(`draft-${Date.now()}`);
+      return;
+    }
+    router.push("/agent");
   }
 
   async function removeChat(id: string) {
     await browserDelete(`/chats/${id}`);
-    if (activeId === id) newChat();
+    if (routeId === id) router.push("/agent");
     await refreshChats();
   }
 
@@ -117,6 +150,7 @@ export function ChatView() {
         onPersisted={(id) => {
           setActiveId(id);
           void refreshChats();
+          if (routeId !== id) router.replace(`/agent/chat/${id}`);
         }}
       />
       <aside className="flex h-full w-64 shrink-0 flex-col border-l border-border bg-background">
@@ -135,19 +169,18 @@ export function ChatView() {
               key={chat.id}
               className={cn(
                 "group mb-1 flex items-center rounded-lg",
-                activeId === chat.id ? "bg-secondary" : "hover:bg-muted/50",
+                routeId === chat.id ? "bg-secondary" : "hover:bg-muted/50",
               )}
             >
-              <button
-                type="button"
-                onClick={() => void openChat(chat.id)}
+              <Link
+                href={`/agent/chat/${chat.id}`}
                 className="min-w-0 flex-1 px-2 py-2 text-left"
               >
                 <p className="truncate text-sm">{chat.title || "New chat"}</p>
                 <p className="truncate font-mono text-[10px] text-muted-foreground">
                   {chat.updated_at.slice(0, 16).replace("T", " ")}
                 </p>
-              </button>
+              </Link>
               <Button
                 size="icon-xs"
                 variant="ghost"

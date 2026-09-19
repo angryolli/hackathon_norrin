@@ -149,7 +149,10 @@ export function AppSidebar() {
 
         <nav className="flex flex-1 flex-col gap-1 px-2">
           {NAV.map((item) => {
-            const active = pathname === item.href;
+            const active =
+              item.href === "/"
+                ? pathname === "/"
+                : pathname === item.href || pathname.startsWith(`${item.href}/`);
             const Icon = item.icon;
             return (
               <Link
