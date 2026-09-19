@@ -46,7 +46,7 @@ export function dataFlowRecord(): DataFlowRecord {
     host,
     noEgress: runtime.noEgress,
     leaves:
-      "Statistical fingerprints from the diagnosis table (n, mean, sd, skew, kurtosis, surprise score, yellow/red signal ids). Never raw records.",
+      "Statistical fingerprints from the diagnosis table (n, mean, sd, skew, kurtosis, |z| against each channel's own history, yellow/red signal ids). Never raw records.",
     why: "The system agent infers roles, quality, and root cause. The operator agent answers questions. Both need derived summaries only.",
     swap: "Point OPENAI_BASE_URL (and OPENAI_API_KEY) at any OpenAI-compatible host, including localhost. No-egress refuses a non-local host.",
   };

@@ -4,19 +4,22 @@ import { Bot, Pause } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { ChatMarkdown } from "@/components/chat-markdown";
 import {
   DriftPane,
+  fieldLabel,
   fmt,
   IDLE_AGENT,
   ReportPane,
   ReviewPane,
   stepLabel,
+  telemetryHref,
   type SystemAgentStatus,
 } from "@/components/monitor-panes";
 import { browserPost, eventsStreamUrl } from "@/lib/browser-api";
 import type { DiagnosisSignal, DiagnosisSnapshot } from "@/lib/pipeline";
+import { cn } from "@/lib/utils";
 
 export function DashboardView() {
   const router = useRouter();
@@ -231,20 +234,61 @@ export function DashboardView() {
                 : "Manual cycle · not 24/7"}
           </p>
         </div>
-        <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-3 font-mono text-[11px] text-muted-foreground">
-          <p>
+        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3">
+          <div>
+            <p className="text-xs font-medium text-foreground">Alarms</p>
+            <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
+              Score = consecutive hot samples past 4σ / 6σ. |z| = peak deviation when the alarm
+              opened.
+            </p>
+          </div>
+          <p className="font-mono text-[11px] text-muted-foreground">
             {yellows} yellow · {reds} red
           </p>
-          <p>
+          {signals.length === 0 ? (
+            <p className="text-[11px] text-muted-foreground">No alarms in the log yet.</p>
+          ) : (
+            <ul className="space-y-2">
+              {signals.slice(0, 12).map((row) => {
+                const top = row.top_fields[0];
+                const href = top ? telemetryHref(top.field_id) : "/telemetry";
+                const label = top ? fieldLabel(top.field_id) : row.id;
+                return (
+                  <li key={row.id} className="rounded-lg border border-border bg-card px-2 py-2">
+                    <p className="font-mono text-[10px]">
+                      <span
+                        className={
+                          row.level === "red" ? "text-red-300" : "text-amber-300"
+                        }
+                      >
+                        {row.level}
+                      </span>
+                      <span className="text-muted-foreground">
+                        {" "}
+                        · t{row.tick} · score {fmt(row.score)} · |z| {fmt(row.z)}
+                      </span>
+                    </p>
+                    <p className="mt-0.5 truncate font-mono text-[10px] text-foreground">
+                      {label}
+                    </p>
+                    <Link
+                      href={href}
+                      className={cn(
+                        buttonVariants({ variant: "ghost", size: "sm" }),
+                        "mt-1 h-6 px-1 text-[10px]",
+                      )}
+                    >
+                      View source
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          <p className="font-mono text-[10px] text-muted-foreground">
             {systemAgent.lastCycleAt
               ? `last cycle ${new Date(systemAgent.lastCycleAt).toLocaleTimeString()}`
               : "no cycle yet"}
-          </p>
-          <p>
-            <Link href="/telemetry" className="underline-offset-2 hover:underline">
-              Open Telemetry
-            </Link>{" "}
-            to inspect a stream. Judge conclusions here.
           </p>
         </div>
         <div className="border-t border-border px-3 py-3 font-mono text-[10px] text-muted-foreground">

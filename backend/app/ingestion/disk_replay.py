@@ -31,6 +31,8 @@ class DiskReplaySource:
     _header: list[str] = field(default_factory=list)
     _numeric_idx: list[int] = field(default_factory=list)
     file_offset: int = 0
+    exhausted: bool = False
+    """Set at end of file. The replay stops there rather than looping."""
 
     def open(self, y_cols: list[str] | None = None, x_column: str = "") -> None:
         self.path = Path(self.path)
@@ -77,6 +79,7 @@ class DiskReplaySource:
         next(reader, None)
         self._fh = fh
         self._reader = reader
+        self.exhausted = False
         self.file_offset = self._tell()
 
     def restore(self, offset: int, tick: int, sparklines: dict[str, list[float]]) -> None:
@@ -92,12 +95,9 @@ class DiskReplaySource:
             self._rewind()
             remaining = max(0, int(tick or 0))
             while remaining > 0 and self._reader is not None:
-                row = next(self._reader, None)
-                if row is None:
-                    self._rewind()
-                    row = next(self._reader, None) if self._reader is not None else None
-                    if row is None:
-                        break
+                if next(self._reader, None) is None:
+                    self.exhausted = True
+                    break
                 remaining -= 1
             self.tick = int(tick or 0)
             self.file_offset = int(offset or self._tell())
@@ -125,13 +125,11 @@ class DiskReplaySource:
 
     def emit(self) -> None:
         with self.lock:
-            if self._reader is None:
+            if self._reader is None or self.exhausted:
                 return
             row = next(self._reader, None)
             if row is None:
-                self._rewind()
-                row = next(self._reader, None) if self._reader is not None else None
-            if row is None:
+                self.exhausted = True
                 return
             for col, idx in zip(self.numeric_cols, self._numeric_idx):
                 if idx >= len(row):

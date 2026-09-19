@@ -6,7 +6,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = ROOT.parent
 DATA_DIR = ROOT / "data"
-ARTIFACT_DIR = ROOT / "artifacts"
 
 
 def _load_dotenv() -> None:
@@ -29,6 +28,9 @@ def _load_dotenv() -> None:
 
 
 _load_dotenv()
+
+# Overridable so a throwaway instance can keep its sqlite out of the dev one.
+ARTIFACT_DIR = Path(os.getenv("ARTIFACT_DIR", "").strip() or ROOT / "artifacts").expanduser()
 
 TICK_SECONDS = float(os.getenv("STREAM_TICK_SECONDS", "0.45"))
 LIVE_BUFFER = int(os.getenv("LIVE_BUFFER", "400"))

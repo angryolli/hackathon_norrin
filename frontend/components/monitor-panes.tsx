@@ -4,13 +4,6 @@ import { Activity, Check, HelpCircle, ShieldAlert } from "lucide-react";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { ChatMarkdown } from "@/components/chat-markdown";
 import { cn } from "@/lib/utils";
@@ -205,6 +198,16 @@ export function ReportPane({
   );
 }
 
+function sourceLabel(fieldId: string) {
+  const sep = fieldId.indexOf("::");
+  return sep >= 0 ? fieldId.slice(0, sep) : "";
+}
+
+function alarmTelemetryHref(row: DiagnosisSignal) {
+  const top = row.top_fields[0];
+  return top ? telemetryHref(top.field_id) : "/telemetry";
+}
+
 export function DriftPane({
   current,
   signals,
@@ -218,83 +221,127 @@ export function DriftPane({
   setOpen: (id: string | null) => void;
   onAsk: (id: string) => void;
 }) {
+  const k = current?.k ?? 6;
+  const zYellow = current?.z_yellow ?? 4;
+  const zRed = current?.z_red ?? 6;
+
   return (
     <div className="mx-auto max-w-3xl space-y-3">
       <div>
-        <h2 className="text-sm font-medium">Alerts</h2>
+        <h2 className="text-sm font-medium">Alarms</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Rolling z-score detector: each channel is scored against its own expanding mean and sd.
+          Yellow opens after {k} consecutive samples with some channel past {fmt(zYellow)}σ; red
+          needs {k} consecutive samples past {fmt(zRed)}σ. The score on each alarm is that
+          consecutive count; |z| is the peak deviation on the opening tick.
+        </p>
         <p className="mt-1 font-mono text-xs text-muted-foreground">
           {current
-            ? `tick ${current.tick} · S=${fmt(current.score)} · z=${fmt(current.z)} · ${
-                current.calibrated ? "calibrated" : "warming up (first 20 samples)"
+            ? `live · tick ${current.tick} · max|z|=${fmt(current.z)} · score ${fmt(current.score)}/${k} · ${
+                current.calibrated
+                  ? "calibrated"
+                  : `warming up (first ${current.burn_in ?? 20} samples)`
               }`
             : "Waiting for the stream."}
         </p>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Yellow and red expanding-moment flags. Open a field in Telemetry to inspect the stream.
-        </p>
       </div>
-      {signals.length === 0 && (
-        <p className="text-sm text-muted-foreground">
-          No yellow or red signals yet. Play the stream; alarms use expanding mean, sd, skew, and
-          kurtosis after the first 20 samples.
+
+      {signals.length === 0 ? (
+        <p className="rounded-xl border border-border bg-card px-4 py-6 text-sm text-muted-foreground">
+          No alarms yet. Play the stream — a single spike never opens one.
         </p>
-      )}
-      {signals.map((row) => (
-        <Card key={row.id}>
-          <CardHeader>
-            <CardTitle className="flex items-center justify-between font-mono text-sm">
-              <span>{row.id}</span>
-              <span className={row.level === "red" ? "text-red-300" : "text-amber-300"}>
-                {row.level} · tick {row.tick} · z {fmt(row.z)}
-              </span>
-            </CardTitle>
-            <CardDescription className="font-mono text-xs">{row.evidence}</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => setOpen(open === row.id ? null : row.id)}
-            >
-              {open === row.id ? "Collapse" : "Expand"}
-            </Button>
-            {open === row.id && (
-              <div className="space-y-3">
-                <ol className="list-decimal space-y-1 pl-4 font-mono text-xs">
-                  {row.top_fields.map((field) => (
-                    <li key={field.field_id}>
+      ) : (
+        <div className="overflow-hidden rounded-xl border border-border bg-card">
+          <ul className="divide-y divide-border">
+            {signals.map((row) => {
+              const top = row.top_fields[0];
+              const source = top ? sourceLabel(top.field_id) : "";
+              const field = top ? fieldLabel(top.field_id) : null;
+              const href = alarmTelemetryHref(row);
+              const expanded = open === row.id;
+              return (
+                <li key={row.id} className="px-4 py-3">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0 space-y-1">
+                      <div className="flex flex-wrap items-center gap-2 font-mono text-xs">
+                        <span
+                          className={
+                            row.level === "red" ? "font-medium text-red-300" : "font-medium text-amber-300"
+                          }
+                        >
+                          {row.level.toUpperCase()}
+                        </span>
+                        <span className="text-muted-foreground">tick {row.tick}</span>
+                        <span className="text-muted-foreground">|z| {fmt(row.z)}</span>
+                        <span className="text-muted-foreground">
+                          score {fmt(row.score)}/{k}
+                        </span>
+                      </div>
+                      <p className="text-sm text-muted-foreground">
+                        {field ? (
+                          <>
+                            Triggered on{" "}
+                            <span className="font-mono text-foreground">{field}</span>
+                            {source ? (
+                              <>
+                                {" "}
+                                in source{" "}
+                                <span className="font-mono text-foreground">{source}</span>
+                              </>
+                            ) : null}
+                          </>
+                        ) : (
+                          row.evidence || "Alarm opened from pooled channel z-scores."
+                        )}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 flex-wrap gap-2">
                       <Link
-                        href={telemetryHref(field.field_id)}
-                        className="underline-offset-2 hover:underline"
+                        href={href}
+                        className={buttonVariants({ variant: "outline", size: "sm" })}
                       >
-                        {fieldLabel(field.field_id)}
+                        View in Telemetry
                       </Link>
-                      {" · score "}
-                      {fmt(field.score)} · mean {fmt(field.mean)} · sd {fmt(field.sd)} · skew{" "}
-                      {fmt(field.skew)} · kurt {fmt(field.kurt)}
-                    </li>
-                  ))}
-                </ol>
-                <div className="flex flex-wrap gap-2">
-                  <Button size="sm" variant="outline" onClick={() => onAsk(row.id)}>
-                    Ask operator
-                  </Button>
-                  <Link
-                    href={
-                      row.top_fields[0]
-                        ? telemetryHref(row.top_fields[0].field_id)
-                        : "/telemetry"
-                    }
-                    className={buttonVariants({ variant: "outline", size: "sm" })}
-                  >
-                    Inspect in Telemetry
-                  </Link>
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      ))}
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setOpen(expanded ? null : row.id)}
+                      >
+                        {expanded ? "Hide" : "Details"}
+                      </Button>
+                    </div>
+                  </div>
+                  {expanded && (
+                    <div className="mt-3 space-y-3 border-t border-border pt-3">
+                      <p className="font-mono text-[11px] text-muted-foreground">{row.evidence}</p>
+                      {row.top_fields.length > 0 && (
+                        <ol className="list-decimal space-y-1 pl-4 font-mono text-xs">
+                          {row.top_fields.map((item) => (
+                            <li key={item.field_id}>
+                              <Link
+                                href={telemetryHref(item.field_id)}
+                                className="underline-offset-2 hover:underline"
+                              >
+                                {fieldLabel(item.field_id)}
+                              </Link>
+                              {" · |z| "}
+                              {fmt(item.score)} · mean {fmt(item.mean)} · sd {fmt(item.sd)} · skew{" "}
+                              {fmt(item.skew)} · kurt {fmt(item.kurt)}
+                            </li>
+                          ))}
+                        </ol>
+                      )}
+                      <Button size="sm" variant="outline" onClick={() => onAsk(row.id)}>
+                        Ask operator
+                      </Button>
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }
@@ -335,7 +382,7 @@ export function FlowPane({ flow }: { flow: DataFlowRecord }) {
         <div>
           <dt className="text-xs text-muted-foreground">Adaptability</dt>
           <dd>
-            Sources are unlabeled columns with a kind of process, business, or other. The moment
+            Sources are unlabeled columns with a kind of process, business, or other. The z-score
             detector and these reports never require TEP names. A second CSV under Telemetry is the
             same pipeline.
           </dd>

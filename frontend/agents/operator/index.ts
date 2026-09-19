@@ -19,7 +19,7 @@ async function logCall(agent: string, tools: string[]) {
 
 const getDiagnosisTool = tool({
   description:
-    "Read the diagnosis table: yellow/red expanding-moment signals (mean, sd, skew, kurtosis) plus the current moment snapshot. Never raw rows.",
+    "Read the diagnosis table: yellow/red rolling z-score signals plus the current per-channel snapshot (n, mean, sd, skew, kurtosis, |z|). Never raw rows.",
   inputSchema: z.object({
     reason: z.string().optional().describe("Why you need the diagnosis table"),
   }),
@@ -55,6 +55,12 @@ const getDecisionLogTool = tool({
 });
 
 const INSTRUCTIONS = `You are the operator-facing chat for a live process monitor.
+
+A flag means a sustained excursion, not a blip. Each channel is studentized against its own expanding
+mean and sd over the run so far; a sample is hot when some channel reaches |z| >= 4. Yellow needs k
+consecutive hot samples (default k=6), red the same run at |z| >= 6, and the first 20 samples never
+alert. A field's score IS its |z|. When you explain a flag, say which channel moved and by how many
+sigma, and for how many samples in a row.
 
 The autonomous system agent (not you) writes understanding, quality, and root-cause reports.
 Your job is plain-language questions: why a flag fired, what a field is doing, what an override means.

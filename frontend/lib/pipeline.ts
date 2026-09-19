@@ -36,6 +36,7 @@ export async function postConfig(body: Record<string, unknown>) {
 
 export type DiagnosisContributor = {
   field_id: string;
+  /** |z| of this channel against its own expanding mean and sd. */
   score: number;
   mean: number | null;
   sd: number | null;
@@ -48,7 +49,9 @@ export type DiagnosisSignal = {
   id: string;
   tick: number;
   level: "yellow" | "red";
+  /** Consecutive hot samples behind this alert. Equals k when it opens. */
   score: number;
+  /** Largest |z| across channels on the sample that raised the alert. */
   z: number;
   top_fields: DiagnosisContributor[];
   evidence: string;
@@ -61,10 +64,22 @@ export type DiagnosisSnapshot = {
   current: {
     tick: number;
     n?: number;
+    /** Consecutive samples so far with some channel past the yellow gate. */
     score: number;
+    /** Largest |z| across channels on this sample. */
     z: number;
     calibrated: boolean;
     fields: DiagnosisContributor[];
+    level?: "normal" | "yellow" | "red";
+    /** Consecutive hot samples an alert needs. */
+    k?: number;
+    z_yellow?: number;
+    z_red?: number;
+    burn_in?: number;
+    streak_yellow?: number;
+    streak_red?: number;
+    /** Channels past the yellow gate on this sample. */
+    n_hot?: number;
   };
   evidence: string;
 };

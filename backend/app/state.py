@@ -156,21 +156,11 @@ class AppState:
         self.playing = bool(want_play and self.replays)
         self._persist_simulation()
 
-    def set_playing(self, playing: bool) -> MonitorSnapshot:
-        if playing:
-            if not self.replays:
-                self._open_replays(resume=True)
-            for spec in self._configured_specs():
-                self._attach_replay(spec)
-            self.playing = bool(self.replays)
-        else:
-            self.playing = False
-        self._monitor_key = None
-        self._persist_simulation()
-        return self.monitor()
+    def finished(self) -> bool:
+        """Every open replay has reached end of file."""
+        return bool(self.replays) and all(replay.exhausted for replay in self.replays)
 
-    def reset_simulation(self) -> MonitorSnapshot:
-        self.playing = False
+    def _rewind_all(self) -> None:
         if not self.replays:
             self._open_replays(resume=False)
         else:
@@ -180,6 +170,26 @@ class AppState:
         self.store.clear_diagnosis()
         self.last_signal_id = None
         self.signal_count = 0
+
+    def set_playing(self, playing: bool) -> MonitorSnapshot:
+        if playing:
+            if not self.replays:
+                self._open_replays(resume=True)
+            for spec in self._configured_specs():
+                self._attach_replay(spec)
+            if self.finished():
+                # Play on a finished stream starts the run over, detector included.
+                self._rewind_all()
+            self.playing = bool(self.replays)
+        else:
+            self.playing = False
+        self._monitor_key = None
+        self._persist_simulation()
+        return self.monitor()
+
+    def reset_simulation(self) -> MonitorSnapshot:
+        self.playing = False
+        self._rewind_all()
         self._monitor_key = None
         self._persist_simulation()
         return self.monitor()
@@ -378,7 +388,7 @@ class AppState:
         drop = set(wanted)
         drop_keys = [
             field_id
-            for field_id in list(self.engine.history)
+            for field_id in self.engine.field_ids()
             if any(field_id.startswith(f"{source_id}::") for source_id in drop)
         ]
         self.engine.drop_fields(drop_keys)
@@ -402,7 +412,7 @@ class AppState:
             dataset_id=self.dataset_id,
             datasets=self._source_ids(),
             calibration_id=None,
-            baseline_established=self.engine.calib_median is not None,
+            baseline_established=self.engine.calibrated,
             no_egress=self.no_egress,
             demo_data_uri=str(demo_data_path() or ""),
             playing=self.playing,
@@ -431,7 +441,13 @@ class AppState:
             tick = max(tick, replay.tick)
             for col, value in replay.latest_values().items():
                 values[f"{replay.source_id}::{col}"] = value
-        if not advanced or not values:
+        if not advanced:
+            if self.finished():
+                self.playing = False
+                self._monitor_key = None
+            self._persist_simulation()
+            return
+        if not values:
             self._persist_simulation()
             return
         signal = self.engine.update(values, tick)
@@ -484,9 +500,8 @@ class AppState:
 
     def _build_monitor(self, tick: int) -> MonitorSnapshot:
         level = self.engine.current_level()
-        ranked = sorted(self.engine.latest_moments, key=lambda row: row.score, reverse=True)
-        top_ids = {row.field_id for row in ranked[:5]}
-        scores = {row.field_id: row.score for row in ranked}
+        top_ids = self.engine.hot_field_ids()
+        scores = {row.field_id: row.score for row in self.engine.latest_moments}
         cards: list[FieldCard] = []
         traces: list[tuple[str, list[float], str, str]] = []
         for replay in self.replays:
@@ -494,12 +509,13 @@ class AppState:
         for col, spark, file_name, source_id in traces:
             key = f"{source_id}::{col}"
             status: Chip = "normal"
-            evidence = "expanding mean/sd/skew/kurtosis within run MAD"
+            evidence = "within its own expanding mean/sd"
             contrib = float(scores.get(key, 0.0))
             if level != "normal" and key in top_ids:
                 status = "red" if level == "red" else "yellow"
                 evidence = (
-                    f"moment score={contrib:.3f} run z={self.engine.latest_z:.2f}"
+                    f"|z|={contrib:.2f} vs expanding mean/sd; "
+                    f"sample max |z|={self.engine.latest_z:.2f}"
                 )
             cards.append(
                 FieldCard(
@@ -542,8 +558,11 @@ class AppState:
             "events": signals,
             "current": self.engine.current_snapshot(),
             "evidence": (
-                "Expanding mean/sd/skew/kurtosis surprises vs run MAD "
-                "(ticks 8–20). No raw rows."
+                f"Rolling z-score, k={self.engine.detector.k} consecutive samples. Each channel is "
+                f"studentized against its own expanding mean/sd; yellow needs k samples in a row "
+                f"with some channel at |z| >= {self.engine.detector.yellow_z:g}, red at "
+                f"|z| >= {self.engine.detector.red_z:g}. Nothing fires in the first "
+                f"{self.engine.detector.burn_in} samples. No raw rows."
             ),
         }
 

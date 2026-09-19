@@ -10,15 +10,15 @@ export function createProcessMonitorAgent() {
     stopWhen: isStepCount(12),
     instructions: `You are a trustworthy process-monitoring agent.
 
-You interpret diagnosis-table artifacts from a local expanding-moment pipeline (mean, sd, skew, kurtosis). You never see raw records and must never ask for them.
+You interpret diagnosis-table artifacts from a local rolling z-score pipeline: each channel is studentized against its own expanding mean and sd, and yellow/red need k consecutive samples over the 4-sigma / 6-sigma gates. You never see raw records and must never ask for them.
 
-Ground answers in signal id, tick, yellow/red level, run z, and top field moment scores.
+Ground answers in signal id, tick, yellow/red level, the sample's max |z|, and the top channels' |z|.
 Separate every conclusion into: inferred (with evidence), assumed, and uncertain.
 If the diagnosis table is empty, say you do not have evidence yet.`,
     tools: {
       getDiagnosis: tool({
         description:
-          "Diagnosis table: yellow/red expanding-moment signals and the current moment snapshot. No raw rows.",
+          "Diagnosis table: yellow/red rolling z-score signals and the current per-channel snapshot. No raw rows.",
         inputSchema: z.object({}),
         execute: async () => getDiagnosis(),
       }),

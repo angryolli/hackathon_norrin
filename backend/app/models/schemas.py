@@ -312,7 +312,7 @@ class DiagnosisSnapshot(BaseModel):
     signals: list[DiagnosisSignal] = Field(default_factory=list)
     events: list[DiagnosisSignal] = Field(default_factory=list)
     current: dict = Field(default_factory=dict)
-    evidence: str = "Expanding mean/sd/skew/kurtosis surprises. No raw rows."
+    evidence: str = "Rolling z-score over expanding per-channel mean/sd. No raw rows."
 
 
 class FieldCard(BaseModel):
