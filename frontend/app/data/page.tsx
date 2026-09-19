@@ -1,10 +1,5 @@
-import { AppShell } from "@/components/app-shell";
-import { DataSourcesView } from "@/components/data-sources-view";
+import { redirect } from "next/navigation";
 
 export default function Page() {
-  return (
-    <AppShell>
-      <DataSourcesView />
-    </AppShell>
-  );
+  redirect("/reports");
 }

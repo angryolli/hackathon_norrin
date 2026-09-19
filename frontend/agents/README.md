@@ -13,7 +13,7 @@ Two Node-side agents in this Next.js process. They do not import each other.
 
 Plain-language interface. The operator asks why a flag fired, challenges a conclusion, or pastes a rule in words. The model only answers from diagnosis artifacts and the decision log. It does not generate the understanding report, quality report, or root-cause diagnosis on its own.
 
-Human **accept / question / override** lives on System Monitor (Review), not in this chat. Questioning in prose still happens here.
+Human **accept / question / override** lives on Reports & Logs (Review), not in this chat. Questioning in prose still happens here.
 
 ## System (`agents/system`)
 
@@ -33,9 +33,9 @@ Demo scheduler: launch runs **one cycle** then stops (no token burn). Continuous
 |---|---|---|
 | 1 Sensor understanding report | System agent | System Monitor → Understanding |
 | 2 Data quality checks | System agent | System Monitor → Quality |
-| 3 Drift / anomaly | Compute plane + system narration | System Monitor → Drift |
+| 3 Drift / anomaly | Compute plane + system narration | Reports & Logs → Drift |
 | 4 Root-cause diagnosis | System agent (+ critique) | System Monitor → Root cause |
-| 5 Human review | Operator (controls) | System Monitor → Review; questions also `/agent` |
-| 6 Decision log | Both (model calls + overrides) | System Monitor → Decision log |
-| 7 Adaptability | Architecture (unlabeled columns, source `kind`) | System Monitor → Data flow |
-| 8 Data-flow record | Node LLM layer | System Monitor → Data flow |
+| 5 Human review | Operator (controls) | Reports & Logs → Review; questions also `/agent` |
+| 6 Decision log | Both (model calls + overrides) | Reports & Logs → Decision log |
+| 7 Adaptability | Architecture (unlabeled columns, source `kind`) | Reports & Logs → Data flow |
+| 8 Data-flow record | Node LLM layer | Reports & Logs → Data flow |

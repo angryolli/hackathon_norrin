@@ -5,12 +5,12 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
   ChevronsLeft,
-  Database,
   Gauge,
   MessageSquare,
   PanelLeft,
   Pause,
   Play,
+  ScrollText,
   Settings,
   X,
 } from "lucide-react";
@@ -22,7 +22,7 @@ import { useSimulation } from "@/components/simulation-context";
 const NAV = [
   { href: "/", label: "System Monitor", icon: Gauge },
   { href: "/agent", label: "Agent", icon: MessageSquare },
-  { href: "/data", label: "Data", icon: Database },
+  { href: "/reports", label: "Reports & Logs", icon: ScrollText },
 ];
 
 export function AppSidebar() {
