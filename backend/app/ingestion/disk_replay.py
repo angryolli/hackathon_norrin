@@ -146,6 +146,15 @@ class DiskReplaySource:
             self.tick += 1
             self.file_offset = self._tell()
 
+    def latest_values(self) -> dict[str, float]:
+        with self.lock:
+            out: dict[str, float] = {}
+            for col in self.numeric_cols:
+                spark = self.sparklines.get(col)
+                if spark:
+                    out[col] = float(spark[-1])
+            return out
+
     def drop_columns(self, columns: list[str]) -> None:
         drop = {col for col in columns if col}
         if not drop:

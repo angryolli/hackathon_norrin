@@ -114,3 +114,30 @@ export const chatSourcesSchema = z.object({
     }),
   ),
 });
+
+export const diagnosisContributorSchema = z.object({
+  field_id: z.string(),
+  score: z.number(),
+  mean: z.number().nullable().optional(),
+  sd: z.number().nullable().optional(),
+  skew: z.number().nullable().optional(),
+  kurt: z.number().nullable().optional(),
+  n: z.number().optional(),
+});
+
+export const diagnosisSignalSchema = z.object({
+  id: z.string(),
+  tick: z.number(),
+  level: z.enum(["yellow", "red"]),
+  score: z.number(),
+  z: z.number(),
+  top_fields: z.array(diagnosisContributorSchema),
+  evidence: z.string(),
+  created_at: z.string().optional(),
+});
+
+export const diagnosisSnapshotSchema = z.object({
+  signals: z.array(diagnosisSignalSchema),
+  current: z.record(z.string(), z.unknown()).optional(),
+  evidence: z.string().optional(),
+});

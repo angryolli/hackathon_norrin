@@ -754,7 +754,7 @@ const StreamTile = memo(function StreamTile({
         </div>
         <div className="flex min-w-0 items-center gap-2">
           <span className="truncate font-mono text-[11px] text-muted-foreground">
-            contrib {stream.contribution.toFixed(2)}
+            score {stream.contribution.toFixed(2)}
           </span>
           <StatusChip status={stream.status} />
         </div>

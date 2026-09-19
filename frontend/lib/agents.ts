@@ -1,18 +1,9 @@
 import { ToolLoopAgent, isStepCount, tool } from "ai";
 import { z } from "zod";
 import { LLMProvider, payloadHash } from "@/lib/llm/provider";
-import {
-  getConfig,
-  getCorrelations,
-  getDecisionLog,
-  getDiagnosisRanking,
-  getProfile,
-  getStructuralRoles,
-  postDecisionLog,
-} from "@/lib/pipeline";
-import { rankingArtifactSchema, roleInferenceSchema } from "@/types/artifacts";
+import { getDecisionLog, getDiagnosis, postDecisionLog } from "@/lib/pipeline";
 
-async function logCall(agent: string, tools: string[], sent: unknown) {
+async function logCall(agent: string, tools: string[]) {
   const provider = new LLMProvider();
   await postDecisionLog({
     type: "model_call",
@@ -20,78 +11,77 @@ async function logCall(agent: string, tools: string[], sent: unknown) {
       agent,
       model: provider.modelId,
       tools,
-      bytes: JSON.stringify(sent).length,
-      hash: payloadHash(sent),
+      hash: payloadHash({ agent, tools }),
     },
     evidence_ref: "derived artifacts only",
   });
 }
 
-async function calId() {
-  const cfg = await getConfig();
-  if (!cfg.calibration_id) throw new Error("not calibrated");
-  return cfg.calibration_id;
-}
+const getDiagnosisTool = tool({
+  description:
+    "Read the diagnosis table: yellow/red expanding-moment signals (mean, sd, skew, kurtosis) plus the current moment snapshot. Never raw rows.",
+  inputSchema: z.object({
+    reason: z.string().optional().describe("Why you need the diagnosis table"),
+  }),
+  execute: async () => {
+    try {
+      return await getDiagnosis();
+    } catch (err) {
+      return {
+        error: err instanceof Error ? err.message : "diagnosis table unavailable",
+        signals: [],
+        current: {},
+        evidence: "Diagnosis lookup failed. Tell the operator you could not read the table.",
+      };
+    }
+  },
+});
 
-const readTools = {
-  getProfile: tool({
-    description: "Statistical fingerprints. Never raw rows.",
-    inputSchema: z.object({}),
-    execute: async () => getProfile(await calId()),
+const getDecisionLogTool = tool({
+  description: "Audit log of inferences, flags, diagnoses, overrides.",
+  inputSchema: z.object({
+    type: z.string().optional().describe("Optional log type filter"),
   }),
-  getCorrelations: tool({
-    description: "Top-k correlations and lagged cross-corr. Never raw rows.",
-    inputSchema: z.object({}),
-    execute: async () => getCorrelations(await calId()),
-  }),
-  getStructuralRoles: tool({
-    description: "Deterministic measured/actuator/ambiguous pre-pass.",
-    inputSchema: z.object({}),
-    execute: async () => getStructuralRoles(await calId()),
-  }),
-  getDiagnosisRanking: tool({
-    description: "Deterministic contribution ranking for a flagged event.",
-    inputSchema: z.object({ event_id: z.string() }),
-    execute: async ({ event_id }) => getDiagnosisRanking(event_id),
-  }),
-  getDecisionLog: tool({
-    description: "Audit log of inferences, flags, diagnoses, overrides.",
-    inputSchema: z.object({ type: z.string().optional() }),
-    execute: async ({ type }) => getDecisionLog(type ? { type } : undefined),
-  }),
-};
+  execute: async ({ type }) => {
+    try {
+      return await getDecisionLog(type ? { type } : undefined);
+    } catch (err) {
+      return {
+        error: err instanceof Error ? err.message : "decision log unavailable",
+        entries: [],
+      };
+    }
+  },
+});
 
-export function createRoleInferenceAgent() {
+const INSTRUCTIONS = `Operator chat for a live process monitor.
+
+Call getDiagnosis before answering questions about the process, flags, yellow/red signals, or fields.
+You may also call getDecisionLog when asked about overrides or past operator actions.
+Answer from those tool results. You never see raw sensor rows and must never ask for them.
+
+If the diagnosis table is empty, the lookup failed, or the run is not yet calibrated (first 20 samples), say so clearly.
+Every substantive answer must mention sources as artifact_type:id (for example diagnosis:sig_abc).
+After a tool result arrives, write a plain-language answer for the operator.`;
+
+export function createChatAgent() {
   const provider = new LLMProvider();
   return new ToolLoopAgent({
     model: provider.model,
     stopWhen: isStepCount(8),
-    instructions: `You infer unlabeled field roles from data-source artifacts only.
-A lower-confidence inference with cited evidence is more valuable than a confident label with no evidence.
-Cite the SPECIFIC correlation value, lag, or distribution shape. If evidence is weak, say so and lower confidence.
-General domain knowledge (reactors, separators, strippers, instruments, vendors, departments) may be used ONLY as hypothesis generation and must be labeled background_knowledge, never as evidence.
-Do not invent column names. Call submitRoles when done.`,
+    instructions: INSTRUCTIONS,
     tools: {
-      ...pick(readTools, ["getProfile", "getCorrelations", "getStructuralRoles"]),
-      submitRoles: tool({
-        description: "Store the role-inference report.",
-        inputSchema: roleInferenceSchema,
-        execute: async (items) => {
-          await postDecisionLog({
-            type: "inference",
-            payload: items,
-            evidence_ref: "profile+corr+roles",
-          });
-          return { stored: true };
-        },
-      }),
+      getDiagnosis: getDiagnosisTool,
+      getDecisionLog: getDecisionLogTool,
     },
     onStart: async () => {
-      await logCall("role-inference", ["getProfile", "getCorrelations", "getStructuralRoles"], {
-        why: "role inference",
-      });
+      await logCall("chat", ["getDiagnosis", "getDecisionLog"]);
     },
   });
+}
+
+export function createRoleInferenceAgent() {
+  return createChatAgent();
 }
 
 export function createRootCauseAgent() {
@@ -99,14 +89,12 @@ export function createRootCauseAgent() {
   return new ToolLoopAgent({
     model: provider.model,
     stopWhen: isStepCount(8),
-    instructions: `You narrate a ranking that has already been computed. Do not alter field order or invent a different top contributor.
-Your confidence statement must match the evidence's stated confidence, not your own assessment of plausibility.
+    instructions: `You narrate diagnosis-table signals that have already been computed.
+Do not invent fields. Cite signal id, tick, level, run z, and the top contributing fields' moment scores.
 Write a numbered, plain-language explanation for a non-technical operator.`,
-    tools: pick(readTools, ["getDiagnosisRanking", "getCorrelations", "getProfile"]),
+    tools: { getDiagnosis: getDiagnosisTool },
     onStart: async () => {
-      await logCall("root-cause", ["getDiagnosisRanking", "getCorrelations", "getProfile"], {
-        why: "root-cause narration",
-      });
+      await logCall("root-cause", ["getDiagnosis"]);
     },
   });
 }
@@ -116,60 +104,16 @@ export function createCritiqueAgent() {
   return new ToolLoopAgent({
     model: provider.model,
     stopWhen: isStepCount(8),
-    instructions: `You challenge a diagnosis using the same evidence pool. Do not overwrite it.
-Argue alternative explanations, weak links, or underweighted evidence.
+    instructions: `You challenge a diagnosis using the diagnosis table. Do not overwrite it.
+Argue alternative explanations or weak links in the moment scores.
 End with agreement: agree|partial|disagree and counterpoints.`,
-    tools: pick(readTools, ["getDiagnosisRanking", "getCorrelations", "getProfile"]),
+    tools: { getDiagnosis: getDiagnosisTool },
     onStart: async () => {
-      await logCall("critique", ["getDiagnosisRanking", "getCorrelations", "getProfile"], {
-        why: "critique",
-      });
-    },
-  });
-}
-
-export function createChatAgent() {
-  const provider = new LLMProvider();
-  return new ToolLoopAgent({
-    model: provider.model,
-    stopWhen: isStepCount(10),
-    instructions: `Operator chat. Answer ONLY from artifacts retrieved via tools.
-If you cannot find supporting evidence, say you don't have evidence rather than speculating.
-Every substantive answer must mention sources as artifact_type:id so the UI can render citations.
-Query the decision log when asked if an operator overrode a similar pattern before.`,
-    tools: readTools,
-    onStart: async () => {
-      await logCall(
-        "chat",
-        Object.keys(readTools),
-        { why: "operator chat" },
-      );
+      await logCall("critique", ["getDiagnosis"]);
     },
   });
 }
 
 export function createRuleAgent() {
-  const provider = new LLMProvider();
-  return new ToolLoopAgent({
-    model: provider.model,
-    stopWhen: isStepCount(4),
-    instructions: `Convert a plain-language operating rule into JSON:
-{column, condition: gt|lt|abs_gt|stuck|missing_rate, threshold, window, severity: info|warn|fail, rule_text}
-column MUST match a real field_id from getProfile. Do not emit code.`,
-    tools: pick(readTools, ["getProfile"]),
-    onStart: async () => {
-      await logCall("rule-compiler", ["getProfile"], { why: "rule compile" });
-    },
-  });
+  return createChatAgent();
 }
-
-function pick<T extends Record<string, unknown>, K extends keyof T>(
-  obj: T,
-  keys: K[],
-): Pick<T, K> {
-  const out = {} as Pick<T, K>;
-  for (const key of keys) out[key] = obj[key];
-  return out;
-}
-
-export { rankingArtifactSchema };

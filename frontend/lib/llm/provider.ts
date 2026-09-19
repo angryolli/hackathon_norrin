@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { createOpenAI } from "@ai-sdk/openai";
 import type { LanguageModel } from "ai";
 
-const MODEL_ID = "mistralai/Mistral-Large-3-675B-Instruct-2512-NVFP4";
+const MODEL_ID = "gpt-4.1-nano";
 
 type Runtime = {
   noEgress: boolean;

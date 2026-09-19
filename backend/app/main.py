@@ -13,16 +13,11 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.config import TICK_SECONDS
 from app.models.schemas import (
-    CalibrateRequest,
-    CalibrateResponse,
     ChatCreateRequest,
     ChatDetail,
     ChatSaveRequest,
     ChatSummary,
-    CompileRuleRequest,
-    CompileRuleResponse,
     ConfigUpdate,
-    CorrelationArtifact,
     DataSource,
     DataSourceBulkDelete,
     DataSourceCreate,
@@ -32,15 +27,8 @@ from app.models.schemas import (
     DataSourceUpdate,
     DecisionAppend,
     DecisionLogPage,
-    DriftArtifact,
-    DriftScoreRequest,
     HealthResponse,
     MonitorSnapshot,
-    ProfileArtifact,
-    QualityCheckRequest,
-    QualityReport,
-    RankingArtifact,
-    RolesArtifact,
     RuntimeConfig,
     StreamControl,
 )
@@ -118,6 +106,13 @@ def _broadcast_snapshot() -> MonitorSnapshot:
     for queue in list(_snapshot_subs):
         _push(queue, snap)
     return snap
+
+
+def _broadcast_events() -> dict:
+    payload = STATE.events_snapshot()
+    for queue in list(_event_subs):
+        _push(queue, payload)
+    return payload
 
 
 def _sse(event: str, data: str) -> str:
@@ -262,72 +257,13 @@ def stream_control(body: StreamControl) -> MonitorSnapshot:
 @app.post("/stream/reset", response_model=MonitorSnapshot)
 def stream_reset() -> MonitorSnapshot:
     STATE.reset_simulation()
+    _broadcast_events()
     return _broadcast_snapshot()
 
 
-@app.post("/calibrate", response_model=CalibrateResponse)
-def calibrate(body: CalibrateRequest | None = None) -> CalibrateResponse:
-    if body and body.dataset_id:
-        STATE.update_config(ConfigUpdate(dataset_id=body.dataset_id))
-        return CalibrateResponse(
-            calibration_id=STATE.calibration_id or "",
-            dataset_id=STATE.dataset_id,
-            n_fields=len(STATE.schema.numeric_cols) if STATE.schema else 0,
-            n_rows_used=0,
-            baseline_established=STATE.model is not None,
-            evidence="recalibrated after data source switch",
-        )
-    return STATE.calibrate()
-
-
-@app.get("/profile/{calibration_id}", response_model=ProfileArtifact)
-def profile(calibration_id: str) -> ProfileArtifact:
-    if not STATE.profile or STATE.calibration_id != calibration_id:
-        raise HTTPException(404, "unknown calibration")
-    return STATE.profile
-
-
-@app.get("/correlations/{calibration_id}", response_model=CorrelationArtifact)
-def correlations(calibration_id: str) -> CorrelationArtifact:
-    if not STATE.corr or STATE.calibration_id != calibration_id:
-        raise HTTPException(404, "unknown calibration")
-    return STATE.corr
-
-
-@app.get("/structural-roles/{calibration_id}", response_model=RolesArtifact)
-def roles(calibration_id: str) -> RolesArtifact:
-    if not STATE.roles or STATE.calibration_id != calibration_id:
-        raise HTTPException(404, "unknown calibration")
-    return STATE.roles
-
-
-@app.post("/rules/compile", response_model=CompileRuleResponse)
-def rules_compile(body: CompileRuleRequest) -> CompileRuleResponse:
-    return STATE.add_rule(body.rule)
-
-
-@app.post("/quality-check", response_model=QualityReport)
-def quality_check(_body: QualityCheckRequest) -> QualityReport:
-    try:
-        return STATE.quality_check()
-    except RuntimeError as exc:
-        raise HTTPException(400, str(exc)) from exc
-
-
-@app.post("/drift/score", response_model=DriftArtifact)
-def drift_score(body: DriftScoreRequest) -> DriftArtifact:
-    try:
-        return STATE.drift_score(body.exclusion_list or None)
-    except RuntimeError as exc:
-        raise HTTPException(400, str(exc)) from exc
-
-
-@app.get("/diagnosis/ranking/{event_id}", response_model=RankingArtifact)
-def ranking(event_id: str) -> RankingArtifact:
-    try:
-        return STATE.ranking(event_id)
-    except KeyError as exc:
-        raise HTTPException(404, "unknown event") from exc
+@app.get("/diagnosis")
+def diagnosis() -> dict:
+    return STATE.diagnosis_snapshot()
 
 
 @app.get("/events")

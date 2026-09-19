@@ -8,7 +8,7 @@ from app.config import MAX_ARTIFACT_BYTES, SPARKLINE_POINTS, TOP_CORR_PAIRS, TOP
 
 Status = Literal["pass", "fail", "warn"]
 RoleKind = Literal["measured", "actuator", "ambiguous"]
-Chip = Literal["normal", "drifting", "stuck", "out_of_range", "excluded"]
+Chip = Literal["normal", "yellow", "red"]
 LogType = Literal["inference", "flag", "diagnosis", "override", "question", "model_call"]
 
 
@@ -285,6 +285,34 @@ class DecisionEntry(BaseModel):
 class DecisionLogPage(BaseModel):
     entries: list[DecisionEntry] = Field(default_factory=list, max_length=100)
     total: int = 0
+
+
+class DiagnosisContributor(BaseModel):
+    field_id: str
+    score: float = 0.0
+    mean: float | None = None
+    sd: float | None = None
+    skew: float | None = None
+    kurt: float | None = None
+    n: int = 0
+
+
+class DiagnosisSignal(BaseModel):
+    id: str
+    tick: int
+    level: str = "yellow"
+    score: float = 0.0
+    z: float = 0.0
+    top_fields: list[DiagnosisContributor] = Field(default_factory=list)
+    evidence: str = ""
+    created_at: str = ""
+
+
+class DiagnosisSnapshot(BaseModel):
+    signals: list[DiagnosisSignal] = Field(default_factory=list)
+    events: list[DiagnosisSignal] = Field(default_factory=list)
+    current: dict = Field(default_factory=dict)
+    evidence: str = "Expanding mean/sd/skew/kurtosis surprises. No raw rows."
 
 
 class FieldCard(BaseModel):

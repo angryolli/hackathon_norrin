@@ -85,3 +85,16 @@ class SimulationSourceHistoryRecord(SQLModel, table=True):
     file_offset: int = 0
     sparklines: str = "{}"
     updated_at: str = ""
+
+
+class DiagnosisSignalRecord(SQLModel, table=True):
+    __tablename__ = "diagnosis_signals"
+
+    id: str = Field(primary_key=True)
+    tick: int = 0
+    level: str = "yellow"
+    score: float = 0.0
+    z: float = 0.0
+    top_fields: str = "[]"
+    evidence: str = ""
+    created_at: str = ""

@@ -26,6 +26,7 @@ export async function getConfig() {
     calibration_id: string | null;
     baseline_established: boolean;
     no_egress: boolean;
+    playing?: boolean;
   }>("/config");
 }
 
@@ -33,20 +34,43 @@ export async function postConfig(body: Record<string, unknown>) {
   return pipeline("/config", { method: "POST", body: JSON.stringify(body) });
 }
 
-export async function getProfile(calibrationId: string) {
-  return pipeline(`/profile/${calibrationId}`);
-}
+export type DiagnosisContributor = {
+  field_id: string;
+  score: number;
+  mean: number | null;
+  sd: number | null;
+  skew: number | null;
+  kurt: number | null;
+  n: number;
+};
 
-export async function getCorrelations(calibrationId: string) {
-  return pipeline(`/correlations/${calibrationId}`);
-}
+export type DiagnosisSignal = {
+  id: string;
+  tick: number;
+  level: "yellow" | "red";
+  score: number;
+  z: number;
+  top_fields: DiagnosisContributor[];
+  evidence: string;
+  created_at: string;
+};
 
-export async function getStructuralRoles(calibrationId: string) {
-  return pipeline(`/structural-roles/${calibrationId}`);
-}
+export type DiagnosisSnapshot = {
+  signals: DiagnosisSignal[];
+  events?: DiagnosisSignal[];
+  current: {
+    tick: number;
+    n?: number;
+    score: number;
+    z: number;
+    calibrated: boolean;
+    fields: DiagnosisContributor[];
+  };
+  evidence: string;
+};
 
-export async function getDiagnosisRanking(eventId: string) {
-  return pipeline(`/diagnosis/ranking/${eventId}`);
+export async function getDiagnosis() {
+  return pipeline<DiagnosisSnapshot>("/diagnosis");
 }
 
 export async function getDecisionLog(params?: { type?: string }) {
@@ -61,29 +85,8 @@ export async function postDecisionLog(body: Record<string, unknown>) {
   });
 }
 
-export async function compileRule(calibrationId: string, rule: unknown) {
-  return pipeline("/rules/compile", {
-    method: "POST",
-    body: JSON.stringify({ calibration_id: calibrationId, rule }),
-  });
-}
-
-export async function qualityCheck(calibrationId: string) {
-  return pipeline("/quality-check", {
-    method: "POST",
-    body: JSON.stringify({ calibration_id: calibrationId, batch_range: "latest" }),
-  });
-}
-
-export async function driftScore(calibrationId: string) {
-  return pipeline("/drift/score", {
-    method: "POST",
-    body: JSON.stringify({ calibration_id: calibrationId, batch_range: "latest" }),
-  });
-}
-
 export async function getEvents() {
-  return pipeline<{ events: unknown[] }>("/events");
+  return pipeline<DiagnosisSnapshot>("/events");
 }
 
 export async function getMonitor() {

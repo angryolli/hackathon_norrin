@@ -1,48 +1,26 @@
 from __future__ import annotations
 
 import re
-import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlparse
 
-import pandas as pd
-
-from app.config import CALIBRATE_ROWS, DATA_DIR, default_dataset, demo_data_path
-from app.correlation.correlation_engine import correlate
-from app.diagnosis.contribution_ranking import rank_event
-from app.drift.calibration import DriftModel, fit_drift_model
-from app.drift.detector import score_batch
+from app.config import DATA_DIR, default_dataset, demo_data_path
+from app.inference.pipeline import StatisticalEngine
 from app.ingestion.disk_replay import DiskReplaySource, preview_headers
 from app.ingestion.files import dataframe_from_api, materialize_csv, write_csv
-from app.ingestion.labels import fault_free_segment
-from app.ingestion.loader import DetectedSchema, load_csv, process_frame
 from app.models.schemas import (
-    CalibrateResponse,
     Chip,
-    CompileRuleResponse,
     ConfigUpdate,
-    CorrelationArtifact,
     DataSource,
     DataSourceCreate,
     DataSourceUpdate,
     DecisionAppend,
     DecisionEntry,
-    DriftArtifact,
-    DriftEvent,
     FieldCard,
     MonitorSnapshot,
-    ProfileArtifact,
-    QualityReport,
-    RankingArtifact,
-    RolesArtifact,
-    RuleSchema,
     RuntimeConfig,
 )
-from app.profiling.statistical_profiler import profile_frame
-from app.profiling.structural_classifier import classify_roles
-from app.quality.baseline_checks import run_quality
-from app.quality.rule_compiler import compile_rule
 from app.storage.artifact_store import ArtifactStore
 
 
@@ -53,21 +31,9 @@ class AppState:
     store: ArtifactStore = field(default_factory=ArtifactStore)
     dataset_id: str = field(default_factory=default_dataset)
     no_egress: bool = False
-    calibration_id: str | None = None
-    schema: DetectedSchema | None = None
-    profile: ProfileArtifact | None = None
-    corr: CorrelationArtifact | None = None
-    roles: RolesArtifact | None = None
-    model: DriftModel | None = None
-    quality: QualityReport | None = None
-    drift: DriftArtifact | None = None
-    events: dict[str, DriftEvent] = field(default_factory=dict)
-    rankings: dict[str, RankingArtifact] = field(default_factory=dict)
-    rules: list[tuple[str, RuleSchema]] = field(default_factory=list)
-    t2_history: list[float] = field(default_factory=list)
-    event_seq: int = 1
-    confirmed: set[str] = field(default_factory=set)
-    overrides: dict[str, dict] = field(default_factory=dict)
+    engine: StatisticalEngine = field(default_factory=StatisticalEngine)
+    last_signal_id: str | None = None
+    signal_count: int = 0
     _monitor_key: tuple | None = None
     _monitor_snap: MonitorSnapshot | None = None
 
@@ -89,6 +55,9 @@ class AppState:
             self.dataset_id = ids[0] if ids else ""
         self.playing = False
         self._restore_simulation()
+        rows = self.store.list_diagnosis(40)
+        self.signal_count = len(rows)
+        self.last_signal_id = str(rows[0]["id"]) if rows else None
 
     def preview_source(self, raw_path: str) -> dict:
         path = Path(raw_path.strip()).expanduser()
@@ -174,7 +143,7 @@ class AppState:
             self.store.save_simulation(
                 self.playing,
                 tick,
-                list(self.t2_history),
+                [],
                 [replay.progress() for replay in self.replays],
             )
         except Exception:
@@ -183,17 +152,8 @@ class AppState:
     def _restore_simulation(self) -> None:
         saved = self.store.get_simulation_state()
         self._open_replays(resume=True)
-        self.t2_history = list(saved.get("t2_history") or [])
         want_play = bool(saved.get("playing"))
-        if want_play and self.replays:
-            if self.model is None:
-                try:
-                    self.calibrate()
-                except Exception:
-                    pass
-            self.playing = True
-        else:
-            self.playing = False
+        self.playing = bool(want_play and self.replays)
         self._persist_simulation()
 
     def set_playing(self, playing: bool) -> MonitorSnapshot:
@@ -202,11 +162,6 @@ class AppState:
                 self._open_replays(resume=True)
             for spec in self._configured_specs():
                 self._attach_replay(spec)
-            if self.model is None and self.replays:
-                try:
-                    self.calibrate()
-                except Exception:
-                    pass
             self.playing = bool(self.replays)
         else:
             self.playing = False
@@ -221,13 +176,10 @@ class AppState:
         else:
             for replay in self.replays:
                 replay.reset_progress()
-        self.events.clear()
-        self.rankings.clear()
-        self.t2_history.clear()
-        self.confirmed.clear()
-        self.overrides.clear()
-        self.quality = None
-        self.drift = None
+        self.engine.reset()
+        self.store.clear_diagnosis()
+        self.last_signal_id = None
+        self.signal_count = 0
         self._monitor_key = None
         self._persist_simulation()
         return self.monitor()
@@ -307,7 +259,7 @@ class AppState:
         if self.playing or self.replays:
             self._attach_replay(spec)
 
-    def _persist_table(self, source_id: str, frame: pd.DataFrame) -> str:
+    def _persist_table(self, source_id: str, frame) -> str:
         dest = DATA_DIR / "sources" / f"{source_id}.csv"
         write_csv(frame, dest)
         return str(dest)
@@ -370,15 +322,6 @@ class AppState:
         self._persist_simulation()
         return self._as_data_source(row)
 
-    def _recalibrate_after_switch(self) -> None:
-        self.events.clear()
-        self.rankings.clear()
-        self.rules.clear()
-        self.t2_history.clear()
-        self.confirmed.clear()
-        self.overrides.clear()
-        self.calibrate()
-
     def add_data_source(self, body: DataSourceCreate) -> DataSource:
         if body.origin == "api" or body.api_url.strip():
             return self.add_api_source(body.api_url)
@@ -418,6 +361,7 @@ class AppState:
                         break
             remaining = [col for col in current if col not in fields]
             self.store.update_data_source(source_id, {"y_columns": remaining})
+            self.engine.drop_fields([f"{source_id}::{col}" for col in fields])
             for replay in self.replays:
                 if replay.source_id == source_id:
                     replay.drop_columns(list(fields))
@@ -432,6 +376,12 @@ class AppState:
         if missing:
             raise KeyError(missing[0])
         drop = set(wanted)
+        drop_keys = [
+            field_id
+            for field_id in list(self.engine.history)
+            if any(field_id.startswith(f"{source_id}::") for source_id in drop)
+        ]
+        self.engine.drop_fields(drop_keys)
         for replay in [item for item in self.replays if item.source_id in drop]:
             try:
                 replay.close()
@@ -451,8 +401,8 @@ class AppState:
         return RuntimeConfig(
             dataset_id=self.dataset_id,
             datasets=self._source_ids(),
-            calibration_id=self.calibration_id,
-            baseline_established=self.model is not None,
+            calibration_id=None,
+            baseline_established=self.engine.calib_median is not None,
             no_egress=self.no_egress,
             demo_data_uri=str(demo_data_path() or ""),
             playing=self.playing,
@@ -465,153 +415,64 @@ class AppState:
             if body.dataset_id not in self._source_ids():
                 raise ValueError(f"unknown data source {body.dataset_id}")
             self._switch_stream(body.dataset_id)
-            self._recalibrate_after_switch()
         return self.runtime_config()
-
-    def calibrate(self) -> CalibrateResponse:
-        spec = self.store.get_data_source(self.dataset_id)
-        if spec is None:
-            raise ValueError(f"unknown data source {self.dataset_id}")
-        csv_path = materialize_csv(self._csv_path(spec), DATA_DIR / "sources" / f"{self.dataset_id}.csv")
-        raw = load_csv(str(csv_path), nrows=CALIBRATE_ROWS)
-        frame, schema = process_frame(raw)
-        frame = fault_free_segment(frame, schema.label_cols)
-        live_cols = [c for c in schema.numeric_cols]
-        if not live_cols:
-            raise ValueError("no numeric columns after schema detection")
-        calibration_id = f"cal_{uuid.uuid4().hex[:10]}"
-        profile = profile_frame(frame, schema, calibration_id)
-        corr = correlate(frame, schema, calibration_id)
-        roles = classify_roles(profile, corr)
-        model = fit_drift_model(frame, schema)
-        self.calibration_id = calibration_id
-        self.schema = schema
-        self.profile = profile
-        self.corr = corr
-        self.roles = roles
-        self.model = model
-        self.store.put("profile", calibration_id, profile)
-        self.store.put("corr", calibration_id, corr)
-        self.store.put("roles", calibration_id, roles)
-        self.store.put(
-            "calibration",
-            calibration_id,
-            {
-                "dataset_id": self.dataset_id,
-                "n_fields": len(schema.numeric_cols),
-                "n_rows_used": len(frame),
-                "label_cols": schema.label_cols,
-            },
-        )
-        return CalibrateResponse(
-            calibration_id=calibration_id,
-            dataset_id=self.dataset_id,
-            n_fields=len(schema.numeric_cols),
-            n_rows_used=len(frame),
-            baseline_established=True,
-            evidence=f"fault-free rows={len(frame)} labels={schema.label_cols}",
-        )
-
-    def require_cal(self) -> str:
-        if not self.calibration_id or self.schema is None or self.profile is None:
-            raise RuntimeError("not calibrated")
-        return self.calibration_id
-
-    def quality_check(self) -> QualityReport:
-        cal = self.require_cal()
-        if self.source is None:
-            raise RuntimeError("no live source")
-        batch = self.source.latest_batch(48)
-        if batch.empty:
-            raise RuntimeError("live window empty")
-        assert self.schema and self.profile
-        report = run_quality(
-            batch,
-            self.schema,
-            self.profile,
-            cal,
-            batch_id=f"b_{self.source.tick}",
-            custom=self.rules,
-        )
-        self.quality = report
-        self.store.put("quality", cal, report)
-        return report
-
-    def drift_score(self, exclusion: list[str] | None = None) -> DriftArtifact:
-        cal = self.require_cal()
-        if self.model is None or self.corr is None or self.source is None:
-            raise RuntimeError("drift model missing")
-        excl = exclusion if exclusion is not None else (self.quality.exclusion_list if self.quality else [])
-        batch = self.source.latest_batch(48)
-        if batch.empty:
-            raise RuntimeError("live window empty")
-        artifact = score_batch(
-            batch,
-            self.model,
-            cal,
-            batch_id=f"b_{self.source.tick}",
-            tick=self.source.tick,
-            exclusion=excl,
-            next_event_index=self.event_seq,
-        )
-        prev_id = self.drift.latest_event_id if self.drift else None
-        prev_flagged = bool(self.drift and self.drift.events)
-        self.drift = artifact
-        self.t2_history = (self.t2_history + artifact.series)[-60:]
-        for ev in artifact.events:
-            if prev_flagged and prev_id:
-                ev.event_id = prev_id
-                artifact.latest_event_id = prev_id
-                self.events[prev_id] = ev
-                ranking = rank_event(ev, self.corr, cal)
-                self.rankings[prev_id] = ranking
-                self.store.put("event", prev_id, ev)
-                self.store.put("ranking", prev_id, ranking)
-            elif ev.event_id not in self.events:
-                self.event_seq += 1
-                self.events[ev.event_id] = ev
-                ranking = rank_event(ev, self.corr, cal)
-                self.rankings[ev.event_id] = ranking
-                self.store.put("event", ev.event_id, ev)
-                self.store.put("ranking", ev.event_id, ranking)
-                self.store.append(
-                    DecisionAppend(
-                        type="flag",
-                        payload={"event_id": ev.event_id, "t2": ev.t2},
-                        evidence_ref=ev.evidence,
-                    )
-                )
-        self.store.put("drift", cal, artifact)
-        return artifact
 
     def tick_live(self) -> None:
         if not self.playing or not self.replays:
             return
+        values: dict[str, float] = {}
+        tick = 0
+        advanced = False
         for replay in self.replays:
+            before = replay.tick
             replay.emit()
+            if replay.tick > before:
+                advanced = True
+            tick = max(tick, replay.tick)
+            for col, value in replay.latest_values().items():
+                values[f"{replay.source_id}::{col}"] = value
+        if not advanced or not values:
+            self._persist_simulation()
+            return
+        signal = self.engine.update(values, tick)
+        if signal is not None:
+            row = self.store.append_diagnosis(
+                {
+                    "tick": signal.tick,
+                    "level": signal.level,
+                    "score": signal.score,
+                    "z": signal.z,
+                    "top_fields": signal.top_fields,
+                    "evidence": signal.evidence,
+                }
+            )
+            self.last_signal_id = str(row.get("id") or "")
+            self.signal_count += 1
+            try:
+                self.store.append(
+                    DecisionAppend(
+                        type="flag",
+                        payload={
+                            "id": row.get("id"),
+                            "level": signal.level,
+                            "tick": signal.tick,
+                            "z": signal.z,
+                        },
+                        evidence_ref=signal.evidence,
+                    )
+                )
+            except Exception:
+                pass
         self._persist_simulation()
-        head = self.source
-        if head is None or self.model is None:
-            return
-        if head.tick % 2 != 0:
-            return
-        try:
-            self.quality_check()
-            self.drift_score()
-        except Exception:
-            return
 
     def monitor(self) -> MonitorSnapshot:
         tick = self.replays[0].tick if self.replays else 0
-        latest = self.drift.latest_event_id if self.drift else None
-        quality_id = id(self.quality)
         key = (
             self.dataset_id,
-            self.calibration_id,
             tick,
-            latest,
-            quality_id,
             self.playing,
+            self.last_signal_id,
+            round(self.engine.latest_z, 3),
             tuple(replay.source_id for replay in self.replays),
         )
         if self._monitor_snap is not None and self._monitor_key == key:
@@ -622,43 +483,30 @@ class AppState:
         return snap
 
     def _build_monitor(self, tick: int) -> MonitorSnapshot:
-        cal = self.calibration_id
-        excl = set(self.quality.exclusion_list if self.quality else [])
-        contrib_map: dict[str, float] = {}
-        if self.drift and self.drift.events:
-            for c in self.drift.events[-1].contributions:
-                contrib_map[c.field_id] = round(c.contribution_score, 3)
-        peak = max(contrib_map.values()) if contrib_map else 0.0
-        cal_frozen = {
-            p.field_id: p.frozen_rate for p in (self.profile.fields if self.profile else [])
-        }
+        level = self.engine.current_level()
+        ranked = sorted(self.engine.latest_moments, key=lambda row: row.score, reverse=True)
+        top_ids = {row.field_id for row in ranked[:5]}
+        scores = {row.field_id: row.score for row in ranked}
         cards: list[FieldCard] = []
         traces: list[tuple[str, list[float], str, str]] = []
         for replay in self.replays:
             traces.extend(replay.cards())
         for col, spark, file_name, source_id in traces:
+            key = f"{source_id}::{col}"
             status: Chip = "normal"
-            evidence = "within frozen baseline"
-            if len(spark) > 5:
-                frozen = 0
-                for i in range(1, len(spark)):
-                    if abs(spark[i] - spark[i - 1]) < 1e-9:
-                        frozen += 1
-                if frozen / (len(spark) - 1) > 0.85 and cal_frozen.get(col, 0) < 0.4:
-                    status = "stuck"
-                    evidence = "near-zero rolling delta in live window"
-            if col in excl:
-                status = "excluded"
-                evidence = "excluded — data-source field fault from quality-check"
-            elif status != "stuck" and peak > 0 and contrib_map.get(col, 0) > 0.4 * peak:
-                status = "drifting"
-                evidence = f"contribution={contrib_map[col]:.3f} on latest T2 event"
+            evidence = "expanding mean/sd/skew/kurtosis within run MAD"
+            contrib = float(scores.get(key, 0.0))
+            if level != "normal" and key in top_ids:
+                status = "red" if level == "red" else "yellow"
+                evidence = (
+                    f"moment score={contrib:.3f} run z={self.engine.latest_z:.2f}"
+                )
             cards.append(
                 FieldCard(
                     field_id=col,
                     sparkline=spark,
                     status=status,
-                    contribution=float(contrib_map.get(col, 0)),
+                    contribution=round(contrib, 3),
                     evidence=evidence,
                     source_file=file_name,
                     source_id=source_id,
@@ -672,76 +520,40 @@ class AppState:
             )
         )
         return MonitorSnapshot(
-            calibration_id=cal,
+            calibration_id=None,
             dataset_id=self.dataset_id,
             tick=tick,
-            t2_series=[round(v, 4) for v in self.t2_history[-60:]],
-            control_limit=round(self.model.t2_limit, 4) if self.model else 0.0,
+            t2_series=[],
+            control_limit=0.0,
             live_boundary=0,
             fields=cards[:80],
             demo_fields=[],
             demo_tick=0,
-            exclusion_list=list(excl)[:20],
-            latest_event_id=self.drift.latest_event_id if self.drift else None,
+            exclusion_list=[],
+            latest_event_id=self.last_signal_id,
             demo_data_uri=str(demo_data_path() or ""),
             playing=self.playing,
         )
 
-    def add_rule(self, rule: RuleSchema) -> CompileRuleResponse:
-        cols = self.schema.numeric_cols if self.schema else []
-        if self.source is None:
-            batch = pd.DataFrame(columns=cols)
-        else:
-            batch = self.source.latest_batch(40)
-        result = compile_rule(rule, cols, batch if not batch.empty else pd.DataFrame(columns=cols))
-        if result.compiled:
-            self.rules.append((result.rule_id, rule))
-            self.store.put("rule", result.rule_id, rule.model_dump())
-        return result
-
-    def events_snapshot(self) -> dict:
-        items = []
-        for ev in reversed(list(self.events.values())):
-            items.append(
-                {
-                    **ev.model_dump(),
-                    "confirmed": ev.event_id in self.confirmed,
-                    "override": self.overrides.get(ev.event_id),
-                    "ranking": self.rankings[ev.event_id].model_dump()
-                    if ev.event_id in self.rankings
-                    else None,
-                }
-            )
+    def diagnosis_snapshot(self) -> dict:
+        signals = self.store.list_diagnosis(40)
         return {
-            "events": items[:20],
-            "evidence": "flagged T2 events vs frozen baseline",
+            "signals": signals,
+            "events": signals,
+            "current": self.engine.current_snapshot(),
+            "evidence": (
+                "Expanding mean/sd/skew/kurtosis surprises vs run MAD "
+                "(ticks 8–20). No raw rows."
+            ),
         }
 
-    def events_key(self) -> tuple:
-        return (
-            tuple(self.events),
-            frozenset(self.confirmed),
-            tuple(sorted(self.overrides)),
-            self.drift.latest_event_id if self.drift else None,
-        )
+    def events_snapshot(self) -> dict:
+        return self.diagnosis_snapshot()
 
-    def ranking(self, event_id: str) -> RankingArtifact:
-        if event_id not in self.rankings:
-            raise KeyError(event_id)
-        return self.rankings[event_id]
+    def events_key(self) -> tuple:
+        return (self.last_signal_id, self.signal_count, self.engine.last_tick)
 
     def log(self, body: DecisionAppend) -> DecisionEntry:
-        if body.type == "override":
-            eid = str(body.payload.get("event_id", ""))
-            if eid:
-                self.overrides[eid] = body.payload
-                body.human_overridden = True
-                self.store.put("override", eid, body.payload)
-        if body.type == "inference" and body.payload.get("accepted"):
-            eid = str(body.payload.get("event_id", ""))
-            if eid:
-                self.confirmed.add(eid)
-                self.store.put("confirmed", eid, {"accepted": True})
         return self.store.append(body)
 
 

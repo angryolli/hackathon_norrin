@@ -57,7 +57,7 @@ export async function browserDelete(path: string): Promise<void> {
   if (!res.ok) throw new Error(`${path} ${res.status}`);
 }
 
-export type Chip = "normal" | "drifting" | "stuck" | "out_of_range" | "excluded";
+export type Chip = "normal" | "yellow" | "red";
 
 export type FieldCard = {
   field_id: string;

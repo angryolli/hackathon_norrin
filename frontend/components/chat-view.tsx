@@ -1,8 +1,8 @@
 "use client";
 
 import { useChat } from "@ai-sdk/react";
-import { DefaultChatTransport, type UIMessage } from "ai";
-import { ArrowUp, Loader2, Plus, Trash2 } from "lucide-react";
+import { DefaultChatTransport, getToolName, isToolUIPart, type UIMessage } from "ai";
+import { ArrowUp, Check, Loader2, Plus, Trash2, Wrench } from "lucide-react";
 import { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -19,7 +19,34 @@ import { cn } from "@/lib/utils";
 
 function partText(part: UIMessage["parts"][number]) {
   if (part.type === "text") return part.text;
+  if (part.type === "reasoning") return part.text;
   return null;
+}
+
+function toolTitle(name: string) {
+  if (name === "getDiagnosis") return "diagnosis table";
+  if (name === "getDecisionLog") return "decision log";
+  return name;
+}
+
+function toolStatus(part: UIMessage["parts"][number]) {
+  if (!isToolUIPart(part)) return null;
+  const title = toolTitle(getToolName(part));
+  const state = "state" in part ? String(part.state) : "";
+  const pending =
+    state === "input-streaming" ||
+    state === "input-available" ||
+    state === "approval-requested" ||
+    state === "";
+  if (state === "output-error") {
+    const err = "errorText" in part && part.errorText ? String(part.errorText) : "failed";
+    return { pending: false, error: true, label: `${title} failed · ${err}` };
+  }
+  return {
+    pending,
+    error: false,
+    label: pending ? `Using ${title}` : `Used ${title}`,
+  };
 }
 
 function toUiMessages(raw: ChatDetail["messages"]): UIMessage[] {
@@ -150,7 +177,9 @@ function ChatPane({
   const params = useSearchParams();
   const context = params.get("context");
   const [input, setInput] = useState(
-    context ? `Why was ${context} flagged? Check overrides in the decision log.` : "",
+    context
+      ? `Explain diagnosis ${context} using the diagnosis table. Never use raw rows.`
+      : "",
   );
   const listRef = useRef<HTMLDivElement>(null);
   const idRef = useRef(conversationId);
@@ -160,7 +189,7 @@ function ChatPane({
     () => new DefaultChatTransport({ api: "/api/chat" }),
     [],
   );
-  const { messages, sendMessage, status } = useChat({
+  const { messages, sendMessage, status, error } = useChat({
     messages: initialMessages,
     transport,
     onFinish: async ({ messages: next }) => {
@@ -180,7 +209,7 @@ function ChatPane({
       }
     },
   });
-  const busy = status !== "ready";
+  const streaming = status === "submitted" || status === "streaming";
 
   useEffect(() => {
     const el = listRef.current;
@@ -190,7 +219,7 @@ function ChatPane({
 
   function submit() {
     const text = input.trim();
-    if (!text || busy) return;
+    if (!text || streaming) return;
     void sendMessage({ text });
     setInput("");
   }
@@ -216,36 +245,79 @@ function ChatPane({
               Ask why a flag fired. Answers come from artifacts only.
             </p>
           )}
-          {messages.map((message) => {
+          {messages.map((message, index) => {
             const fromUser = message.role === "user";
             const texts = message.parts.map(partText).filter((t): t is string => Boolean(t));
-            if (!texts.length) return null;
-            return (
-              <article
-                key={message.id}
-                className={cn("flex w-full", fromUser ? "justify-end pl-16" : "justify-start pr-16")}
-              >
-                <div
-                  className={cn(
-                    "max-w-[min(36rem,100%)] rounded-2xl px-3 py-2 text-sm",
-                    fromUser
-                      ? "bg-secondary text-secondary-foreground"
-                      : "border border-border bg-card text-card-foreground",
-                  )}
-                >
-                  <p className="mb-1 text-[10px] tracking-wide text-muted-foreground uppercase">
-                    {fromUser ? "You" : "Assistant"}
-                  </p>
-                  <div>
-                    {texts.map((text, i) => (
-                      <ChatMarkdown key={i} text={text} />
-                    ))}
+            const tools = message.parts
+              .map(toolStatus)
+              .filter((t): t is NonNullable<ReturnType<typeof toolStatus>> => Boolean(t));
+            const isLast = index === messages.length - 1;
+            const waitingOnReply = !fromUser && streaming && isLast && texts.length === 0;
+            if (fromUser) {
+              return (
+                <article key={message.id} className="flex w-full justify-end pl-16">
+                  <div className="max-w-[min(36rem,100%)] rounded-2xl bg-secondary px-3 py-2 text-sm text-secondary-foreground">
+                    <p className="mb-1 text-[10px] tracking-wide text-muted-foreground uppercase">
+                      You
+                    </p>
+                    <div>
+                      {texts.map((text, i) => (
+                        <ChatMarkdown key={i} text={text} />
+                      ))}
+                    </div>
                   </div>
-                </div>
-              </article>
+                </article>
+              );
+            }
+            if (!texts.length && !tools.length && !waitingOnReply) return null;
+            return (
+              <div key={message.id} className="flex w-full flex-col items-start gap-2 pr-16">
+                {tools.map((tool, i) => (
+                  <div
+                    key={`${message.id}-tool-${i}`}
+                    className={cn(
+                      "flex items-center gap-2 rounded-full border px-3 py-1 text-xs",
+                      tool.error
+                        ? "border-red-500/40 text-red-400"
+                        : "border-border bg-muted/40 text-muted-foreground",
+                    )}
+                  >
+                    {tool.pending ? (
+                      <Loader2 className="size-3.5 animate-spin" />
+                    ) : tool.error ? (
+                      <Wrench className="size-3.5" />
+                    ) : (
+                      <Check className="size-3.5" />
+                    )}
+                    <span>{tool.label}</span>
+                  </div>
+                ))}
+                {waitingOnReply && tools.length === 0 && (
+                  <p className="pl-1 text-xs text-muted-foreground">Thinking…</p>
+                )}
+                {texts.length > 0 && (
+                  <article className="max-w-[min(36rem,100%)] rounded-2xl border border-border bg-card px-3 py-2 text-sm text-card-foreground">
+                    <p className="mb-1 text-[10px] tracking-wide text-muted-foreground uppercase">
+                      Assistant
+                    </p>
+                    <div>
+                      {texts.map((text, i) => (
+                        <ChatMarkdown key={i} text={text} />
+                      ))}
+                    </div>
+                  </article>
+                )}
+              </div>
             );
           })}
-          {busy && <p className="pl-1 text-xs text-muted-foreground">Thinking…</p>}
+          {streaming && messages.at(-1)?.role !== "assistant" && (
+            <p className="pl-1 text-xs text-muted-foreground">Thinking…</p>
+          )}
+          {error && (
+            <p className="pl-1 text-xs text-red-400">
+              {error.message || "The agent failed before it could answer."}
+            </p>
+          )}
         </div>
       </div>
 
@@ -260,16 +332,16 @@ function ChatPane({
             onKeyDown={onKeyDown}
             placeholder="Ask why a flag fired"
             rows={1}
-            disabled={busy}
+            disabled={streaming}
             className="max-h-24 min-h-10 flex-1 resize-none overflow-y-auto rounded-lg border border-input bg-transparent px-3 py-2 text-sm outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50"
           />
           <Button
             type="submit"
             size="icon"
-            disabled={busy || !input.trim()}
+            disabled={streaming || !input.trim()}
             aria-label="Send"
           >
-            {busy ? <Loader2 className="animate-spin" /> : <ArrowUp />}
+            {streaming ? <Loader2 className="animate-spin" /> : <ArrowUp />}
           </Button>
         </div>
       </form>

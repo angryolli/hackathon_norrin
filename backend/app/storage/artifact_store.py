@@ -20,6 +20,7 @@ from app.storage.models import (
     DecisionLogRecord,
     SimulationSourceHistoryRecord,
     SimulationStateRecord,
+    DiagnosisSignalRecord,
 )
 
 DB_PATH = ARTIFACT_DIR / "monitor.sqlite"
@@ -42,7 +43,7 @@ class ArtifactStore:
         self._migrate_data_sources()
 
     def _session(self) -> Session:
-        return Session(self._engine)
+        return Session(self._engine, expire_on_commit=False)
 
     def _migrate_data_sources(self) -> None:
         with self._engine.connect() as conn:
@@ -156,9 +157,11 @@ class ArtifactStore:
 
     def create_chat(self, title: str = "New chat") -> dict:
         now = datetime.now(timezone.utc).isoformat()
+        chat_id = uuid.uuid4().hex
+        label = (title.strip() or "New chat")[:80]
         row = ChatConversationRecord(
-            id=uuid.uuid4().hex,
-            title=(title.strip() or "New chat")[:80],
+            id=chat_id,
+            title=label,
             created_at=now,
             updated_at=now,
         )
@@ -166,10 +169,10 @@ class ArtifactStore:
             session.add(row)
             session.commit()
         return {
-            "id": row.id,
-            "title": row.title,
-            "created_at": row.created_at,
-            "updated_at": row.updated_at,
+            "id": chat_id,
+            "title": label,
+            "created_at": now,
+            "updated_at": now,
             "messages": [],
         }
 
@@ -250,6 +253,7 @@ class ArtifactStore:
             ).all()
             for row in rows:
                 session.delete(row)
+            session.flush()
             session.delete(conv)
             session.commit()
             return True
@@ -501,4 +505,56 @@ class ArtifactStore:
                 for col, values in sparklines.items()
                 if isinstance(values, list)
             },
+        }
+
+    def append_diagnosis(self, body: dict) -> dict:
+        now = datetime.now(timezone.utc).isoformat()
+        row_id = str(body.get("id") or f"sig_{uuid.uuid4().hex[:10]}")
+        rec = DiagnosisSignalRecord(
+            id=row_id,
+            tick=int(body.get("tick") or 0),
+            level=str(body.get("level") or "yellow"),
+            score=float(body.get("score") or 0),
+            z=float(body.get("z") or 0),
+            top_fields=json.dumps(body.get("top_fields") or []),
+            evidence=str(body.get("evidence") or ""),
+            created_at=now,
+        )
+        with self._lock, self._session() as session:
+            session.add(rec)
+            session.commit()
+        return self._diagnosis_dict(rec)
+
+    def list_diagnosis(self, limit: int = 40) -> list[dict]:
+        with self._lock, self._session() as session:
+            rows = session.exec(
+                select(DiagnosisSignalRecord)
+                .order_by(col(DiagnosisSignalRecord.created_at).desc())
+                .limit(limit)
+            ).all()
+            return [self._diagnosis_dict(row) for row in rows]
+
+    def clear_diagnosis(self) -> None:
+        with self._lock, self._session() as session:
+            rows = session.exec(select(DiagnosisSignalRecord)).all()
+            for row in rows:
+                session.delete(row)
+            session.commit()
+
+    def _diagnosis_dict(self, row: DiagnosisSignalRecord) -> dict:
+        try:
+            top_fields = json.loads(row.top_fields or "[]")
+        except (TypeError, ValueError):
+            top_fields = []
+        if not isinstance(top_fields, list):
+            top_fields = []
+        return {
+            "id": row.id,
+            "tick": int(row.tick or 0),
+            "level": row.level,
+            "score": float(row.score or 0),
+            "z": float(row.z or 0),
+            "top_fields": top_fields,
+            "evidence": row.evidence,
+            "created_at": row.created_at,
         }

@@ -11,8 +11,8 @@ export async function POST(request: Request) {
     const agent = critique ? createCritiqueAgent() : createRootCauseAgent();
     const result = await agent.generate({
       prompt: critique
-        ? `Challenge the diagnosis for event ${event_id} using ranking evidence.`
-        : `Narrate the deterministic ranking for event ${event_id}. Do not reorder fields.`,
+        ? `Challenge diagnosis ${event_id} using the diagnosis table.`
+        : `Narrate diagnosis ${event_id} from the diagnosis table. Do not invent fields.`,
     });
     await postDecisionLog({
       type: "diagnosis",
