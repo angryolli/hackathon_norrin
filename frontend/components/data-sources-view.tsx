@@ -93,7 +93,7 @@ export function DataSourcesView() {
     height: number;
   } | null>(null);
   const ticksRef = useRef({ tick: -1, demo: -1, dataset: "", playing: false, fields: "" });
-  const { setPlaying } = useSimulation();
+  const { applySnapshot } = useSimulation();
   const searchParams = useSearchParams();
   const openedQuery = useRef(false);
 
@@ -122,7 +122,10 @@ export function DataSourcesView() {
         fields: fieldKey,
       };
       setSnap(data);
-      setPlaying(Boolean(data.playing));
+      applySnapshot({
+        playing: data.playing,
+        ticks_per_second: data.ticks_per_second,
+      });
     }
 
     function connect() {
@@ -160,7 +163,7 @@ export function DataSourcesView() {
       document.removeEventListener("visibilitychange", onVis);
       source?.close();
     };
-  }, [setPlaying]);
+  }, [applySnapshot]);
 
   useEffect(() => {
     let on = true;
@@ -392,7 +395,10 @@ export function DataSourcesView() {
       fields: fieldKey,
     };
     setSnap(updated);
-    setPlaying(Boolean(updated.playing));
+    applySnapshot({
+      playing: updated.playing,
+      ticks_per_second: updated.ticks_per_second,
+    });
   }
 
   function toggleSelected(key: string) {

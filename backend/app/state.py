@@ -5,7 +5,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlparse
 
-from app.config import DATA_DIR, default_dataset, demo_data_path
+from app.config import (
+    DATA_DIR,
+    DEFAULT_TICKS_PER_SECOND,
+    MAX_TICKS_PER_SECOND,
+    MIN_TICKS_PER_SECOND,
+    default_dataset,
+    demo_data_path,
+)
 from app.inference.pipeline import StatisticalEngine
 from app.ingestion.disk_replay import DiskReplaySource, preview_headers
 from app.ingestion.files import dataframe_from_api, materialize_csv, write_csv
@@ -28,6 +35,7 @@ from app.storage.artifact_store import ArtifactStore
 class AppState:
     replays: list[DiskReplaySource] = field(default_factory=list)
     playing: bool = False
+    ticks_per_second: float = DEFAULT_TICKS_PER_SECOND
     store: ArtifactStore = field(default_factory=ArtifactStore)
     dataset_id: str = field(default_factory=default_dataset)
     no_egress: bool = False
@@ -36,6 +44,19 @@ class AppState:
     signal_count: int = 0
     _monitor_key: tuple | None = None
     _monitor_snap: MonitorSnapshot | None = None
+
+    @property
+    def tick_seconds(self) -> float:
+        rate = max(self.ticks_per_second, MIN_TICKS_PER_SECOND)
+        return 1.0 / rate
+
+    def set_ticks_per_second(self, rate: float) -> float:
+        value = float(rate)
+        if not (value == value):  # NaN
+            raise ValueError("ticks_per_second must be a number")
+        self.ticks_per_second = max(MIN_TICKS_PER_SECOND, min(MAX_TICKS_PER_SECOND, value))
+        self._monitor_key = None
+        return self.ticks_per_second
 
     @property
     def source(self) -> DiskReplaySource | None:
@@ -416,11 +437,14 @@ class AppState:
             no_egress=self.no_egress,
             demo_data_uri=str(demo_data_path() or ""),
             playing=self.playing,
+            ticks_per_second=self.ticks_per_second,
         )
 
     def update_config(self, body: ConfigUpdate) -> RuntimeConfig:
         if body.no_egress is not None:
             self.no_egress = body.no_egress
+        if body.ticks_per_second is not None:
+            self.set_ticks_per_second(body.ticks_per_second)
         if body.dataset_id and body.dataset_id != self.dataset_id:
             if body.dataset_id not in self._source_ids():
                 raise ValueError(f"unknown data source {body.dataset_id}")
@@ -487,6 +511,7 @@ class AppState:
             self.dataset_id,
             tick,
             self.playing,
+            round(self.ticks_per_second, 3),
             self.last_signal_id,
             round(self.engine.latest_z, 3),
             tuple(replay.source_id for replay in self.replays),
@@ -549,6 +574,7 @@ class AppState:
             latest_event_id=self.last_signal_id,
             demo_data_uri=str(demo_data_path() or ""),
             playing=self.playing,
+            ticks_per_second=self.ticks_per_second,
         )
 
     def diagnosis_snapshot(self) -> dict:

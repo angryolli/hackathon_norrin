@@ -38,11 +38,13 @@ class RuntimeConfig(BaseModel):
     no_egress: bool = False
     demo_data_uri: str = ""
     playing: bool = False
+    ticks_per_second: float = 2.0
 
 
 class ConfigUpdate(BaseModel):
     dataset_id: str | None = None
     no_egress: bool | None = None
+    ticks_per_second: float | None = None
 
 
 class CalibrateRequest(BaseModel):
@@ -102,7 +104,8 @@ class DataSourcePreview(BaseModel):
 
 
 class StreamControl(BaseModel):
-    playing: bool
+    playing: bool | None = None
+    ticks_per_second: float | None = None
 
 
 class DataSourceFieldRef(BaseModel):
@@ -339,6 +342,7 @@ class MonitorSnapshot(BaseModel):
     latest_event_id: str | None = None
     demo_data_uri: str = ""
     playing: bool = False
+    ticks_per_second: float = 2.0
     evidence: str = "Monitor snapshot is aggregated windows, not raw row dumps."
 
 

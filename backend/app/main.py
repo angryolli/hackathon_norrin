@@ -11,7 +11,6 @@ from fastapi.responses import StreamingResponse
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from app.config import TICK_SECONDS
 from app.models.schemas import (
     ChatCreateRequest,
     ChatDetail,
@@ -98,7 +97,7 @@ async def _stream() -> None:
             payload = STATE.events_snapshot()
             for queue in list(_event_subs):
                 _push(queue, payload)
-        await asyncio.sleep(TICK_SECONDS)
+        await asyncio.sleep(STATE.tick_seconds)
 
 
 def _broadcast_snapshot() -> MonitorSnapshot:
@@ -250,7 +249,13 @@ def data_sources_bulk_delete(body: DataSourceBulkDelete) -> MonitorSnapshot:
 
 @app.post("/stream/control", response_model=MonitorSnapshot)
 def stream_control(body: StreamControl) -> MonitorSnapshot:
-    STATE.set_playing(body.playing)
+    if body.ticks_per_second is not None:
+        try:
+            STATE.set_ticks_per_second(body.ticks_per_second)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+    if body.playing is not None:
+        STATE.set_playing(body.playing)
     return _broadcast_snapshot()
 
 

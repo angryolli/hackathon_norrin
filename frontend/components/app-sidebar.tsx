@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { browserGet, type DataSource, type RuntimeConfig } from "@/lib/browser-api";
 import { useSimulation } from "@/components/simulation-context";
+import { SimulationSpeedometer } from "@/components/simulation-speedometer";
 
 const NAV = [
   { href: "/", label: "System Dashboard", icon: LayoutDashboard },
@@ -135,7 +136,7 @@ export function AppSidebar() {
           </Button>
         </div>
 
-        <div className={cn("px-2 pb-2", folded && "px-1")}>
+        <div className={cn("space-y-2 px-2 pb-2", folded && "px-1")}>
           <Button
             size={folded ? "icon-sm" : "sm"}
             variant={playing ? "secondary" : "default"}
@@ -147,6 +148,7 @@ export function AppSidebar() {
             {playing ? <Pause /> : <Play />}
             <span className={cn(folded && "hidden")}>{playing ? "Pause" : "Play"}</span>
           </Button>
+          <SimulationSpeedometer compact={folded} />
         </div>
 
         <nav className="flex flex-1 flex-col gap-1 px-2">

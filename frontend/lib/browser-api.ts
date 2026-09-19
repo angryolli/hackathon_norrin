@@ -82,6 +82,7 @@ export type MonitorSnapshot = {
   latest_event_id: string | null;
   demo_data_uri?: string;
   playing?: boolean;
+  ticks_per_second?: number;
   evidence: string;
 };
 
@@ -117,6 +118,7 @@ export type RuntimeConfig = {
   no_egress: boolean;
   demo_data_uri?: string;
   playing?: boolean;
+  ticks_per_second?: number;
 };
 
 export type ChatSummary = {
