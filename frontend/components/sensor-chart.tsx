@@ -19,6 +19,38 @@ function formatTick(n: number) {
   return n.toFixed(2);
 }
 
+function niceNum(range: number, round: boolean) {
+  const exp = Math.floor(Math.log10(Math.max(range, 1e-9)));
+  const frac = range / 10 ** exp;
+  let nice: number;
+  if (round) {
+    if (frac < 1.5) nice = 1;
+    else if (frac < 3) nice = 2;
+    else if (frac < 7) nice = 5;
+    else nice = 10;
+  } else if (frac <= 1) nice = 1;
+  else if (frac <= 2) nice = 2;
+  else if (frac <= 5) nice = 5;
+  else nice = 10;
+  return nice * 10 ** exp;
+}
+
+function niceScale(lo: number, hi: number, count = 5) {
+  if (!Number.isFinite(lo) || !Number.isFinite(hi) || hi - lo < 1e-9) {
+    lo -= 1;
+    hi += 1;
+  }
+  const range = niceNum(hi - lo, false);
+  const step = niceNum(range / Math.max(count - 1, 1), true);
+  const min = Math.floor(lo / step) * step;
+  const max = Math.ceil(hi / step) * step;
+  const ticks: number[] = [];
+  for (let v = min; v <= max + step * 0.5; v += step) ticks.push(v);
+  return { min, max, ticks, step };
+}
+
+const X_GRID = 20;
+
 function lerp(a: number, b: number, t: number) {
   return a + (b - a) * t;
 }
@@ -65,6 +97,7 @@ export function SensorChart({
   const inkRef = useRef(1);
   const lastFrameRef = useRef(0);
   const historyRef = useRef(100);
+  const yScaleRef = useRef<ReturnType<typeof niceScale> | null>(null);
   const rafRef = useRef(0);
 
   useEffect(() => {
@@ -76,6 +109,7 @@ export function SensorChart({
       lastTickRef.current = tick ?? null;
       playheadRef.current = 0;
       inkRef.current = 1;
+      yScaleRef.current = null;
       return;
     }
 
@@ -86,6 +120,7 @@ export function SensorChart({
       lastTickRef.current = incomingTick;
       playheadRef.current = Math.max(0, values.length - 1);
       inkRef.current = 1;
+      yScaleRef.current = null;
       return;
     }
 
@@ -96,6 +131,7 @@ export function SensorChart({
       lastTickRef.current = tick;
       playheadRef.current = Math.max(0, values.length - 1);
       inkRef.current = 1;
+      yScaleRef.current = null;
       return;
     }
 
@@ -188,20 +224,34 @@ export function SensorChart({
       }
 
       const series = drawn.length ? drawn : [{ i: 0, v: 0 }];
-      let min = Math.min(...series.map((s) => s.v));
-      let max = Math.max(...series.map((s) => s.v));
+      let dataMin = Infinity;
+      let dataMax = -Infinity;
+      for (const s of samples) {
+        if (s.v < dataMin) dataMin = s.v;
+        if (s.v > dataMax) dataMax = s.v;
+      }
       if (limit !== undefined) {
-        min = Math.min(min, limit);
-        max = Math.max(max, limit);
+        dataMin = Math.min(dataMin, limit);
+        dataMax = Math.max(dataMax, limit);
       }
-      if (max - min < 1e-6) {
-        min -= 1;
-        max += 1;
+      if (!Number.isFinite(dataMin)) {
+        dataMin = 0;
+        dataMax = 1;
       }
-      const padY = (max - min) * 0.45;
-      min -= padY;
-      max += padY;
-      const span = max - min;
+      const padY = Math.max((dataMax - dataMin) * 0.45, 1e-6);
+      const wantMin = dataMin - padY;
+      const wantMax = dataMax + padY;
+      let scale = yScaleRef.current;
+      if (!scale || wantMin < scale.min || wantMax > scale.max) {
+        scale = niceScale(
+          Math.min(wantMin, scale?.min ?? wantMin),
+          Math.max(wantMax, scale?.max ?? wantMax),
+        );
+        yScaleRef.current = scale;
+      }
+      const min = scale.min;
+      const max = scale.max;
+      const span = max - min || 1;
       const xOf = (i: number) => padL + ((i - leftIndex) / windowSize) * plotW;
       const yOf = (v: number) => padT + (1 - (v - min) / span) * plotH;
 
@@ -215,12 +265,21 @@ export function SensorChart({
 
       ctx.strokeStyle = "rgba(255,255,255,0.08)";
       ctx.lineWidth = 1;
-      const yTicks = 4;
-      for (let i = 0; i <= yTicks; i++) {
-        const y = padT + (i / yTicks) * plotH;
+      for (const t of scale.ticks) {
+        const y = yOf(t);
         ctx.beginPath();
         ctx.moveTo(padL, y);
         ctx.lineTo(cssW - padR, y);
+        ctx.stroke();
+      }
+
+      const firstGrid = Math.ceil(leftIndex / X_GRID) * X_GRID;
+      ctx.strokeStyle = "rgba(255,255,255,0.1)";
+      for (let g = firstGrid; g <= rightIndex; g += X_GRID) {
+        const x = xOf(g);
+        ctx.beginPath();
+        ctx.moveTo(x, padT);
+        ctx.lineTo(x, padT + plotH);
         ctx.stroke();
       }
 
@@ -251,20 +310,16 @@ export function SensorChart({
       ctx.fillStyle = "rgba(161,161,170,0.9)";
       ctx.textAlign = "right";
       ctx.textBaseline = "middle";
-      for (let i = 0; i <= yTicks; i++) {
-        const t = max - (span * i) / yTicks;
-        const y = padT + (i / yTicks) * plotH;
-        ctx.fillText(formatTick(t), padL - 6, y);
+      for (const t of scale.ticks) {
+        ctx.fillText(formatTick(t), padL - 6, yOf(t));
       }
 
       ctx.textAlign = "center";
       ctx.textBaseline = "top";
-      const xCount = 5;
-      for (let i = 0; i < xCount; i++) {
-        const frac = i / (xCount - 1);
-        const idx = leftIndex + frac * windowSize;
-        const x = padL + frac * plotW;
-        ctx.fillText(String(Math.max(0, Math.round(idx))), x, cssH - padB + 4);
+      for (let g = firstGrid; g <= rightIndex; g += X_GRID) {
+        const x = xOf(g);
+        if (x < padL + 4 || x > cssW - padR - 4) continue;
+        ctx.fillText(String(Math.max(0, g)), x, cssH - padB + 4);
       }
 
       rafRef.current = requestAnimationFrame(draw);
