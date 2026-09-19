@@ -4,17 +4,18 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { Plus, RotateCcw, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { StatusChip } from "@/components/status-chip";
-import { StreamChart } from "@/components/stream-chart";
+import { StreamChart, type ChartMark } from "@/components/stream-chart";
 import {
   browserGet,
   browserPost,
+  eventsStreamUrl,
   monitorStreamUrl,
   type DataSource,
   type DataSourcePreview,
   type FieldCard,
   type MonitorSnapshot,
 } from "@/lib/browser-api";
+import type { DiagnosisSignal, DiagnosisSnapshot } from "@/lib/pipeline";
 import { useSimulation } from "@/components/simulation-context";
 import { cn } from "@/lib/utils";
 
@@ -26,6 +27,34 @@ function parseSourceKey(key: string) {
   const idx = key.indexOf("\t");
   if (idx < 0) return { source_id: "", field_id: key };
   return { source_id: key.slice(0, idx), field_id: key.slice(idx + 1) };
+}
+
+function fieldHit(signalFieldId: string, stream: FieldCard) {
+  const key = `${stream.source_id ?? ""}::${stream.field_id}`;
+  return (
+    signalFieldId === key ||
+    signalFieldId === stream.field_id ||
+    signalFieldId.endsWith(`::${stream.field_id}`)
+  );
+}
+
+function marksForStream(
+  stream: FieldCard,
+  tick: number | undefined,
+  signals: DiagnosisSignal[],
+): ChartMark[] {
+  const len = stream.sparkline.length;
+  if (!len || tick == null) return [];
+  const windowStart = tick - (len - 1);
+  const out: ChartMark[] = [];
+  for (const signal of signals) {
+    if (signal.level !== "yellow" && signal.level !== "red") continue;
+    if (!signal.top_fields.some((field) => fieldHit(field.field_id, stream))) continue;
+    const index = signal.tick - windowStart;
+    if (index < 0 || index > len - 1) continue;
+    out.push({ index, level: signal.level });
+  }
+  return out;
 }
 
 type OriginChoice = "api" | "file" | null;
@@ -51,6 +80,7 @@ export function DataSourcesView() {
   const [deleting, setDeleting] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [signals, setSignals] = useState<DiagnosisSignal[]>([]);
   const ticksRef = useRef({ tick: -1, demo: -1, dataset: "", playing: false, fields: "" });
   const { setPlaying } = useSimulation();
 
@@ -118,6 +148,50 @@ export function DataSourcesView() {
       source?.close();
     };
   }, [setPlaying]);
+
+  useEffect(() => {
+    let on = true;
+    let source: EventSource | null = null;
+    const sig = { current: "" };
+
+    function apply(data: DiagnosisSnapshot) {
+      if (!on) return;
+      const next = data.signals ?? data.events ?? [];
+      const nextSig = next.map((row) => `${row.id}:${row.level}:${row.tick}`).join("|");
+      if (nextSig === sig.current) return;
+      sig.current = nextSig;
+      setSignals(next);
+    }
+
+    function connect() {
+      source?.close();
+      source = new EventSource(eventsStreamUrl());
+      source.addEventListener("events", (event) => {
+        try {
+          apply(JSON.parse((event as MessageEvent<string>).data) as DiagnosisSnapshot);
+        } catch {
+          /* ignore malformed frames */
+        }
+      });
+    }
+
+    function onVis() {
+      if (document.hidden) {
+        source?.close();
+        source = null;
+        return;
+      }
+      connect();
+    }
+
+    connect();
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      on = false;
+      document.removeEventListener("visibilitychange", onVis);
+      source?.close();
+    };
+  }, []);
 
   async function loadSources() {
     try {
@@ -470,6 +544,7 @@ export function DataSourcesView() {
                 key={key}
                 stream={stream}
                 tick={snap?.tick}
+                marks={marksForStream(stream, snap?.tick, signals)}
                 deleting={deleting}
                 selected={selected.has(key)}
                 onSelect={() => toggleSelected(key)}
@@ -710,12 +785,14 @@ const STREAM_CARD = "box-border h-52 min-w-0 rounded-xl border bg-card p-2";
 const StreamTile = memo(function StreamTile({
   stream,
   tick,
+  marks,
   deleting,
   selected,
   onSelect,
 }: {
   stream: FieldCard;
   tick?: number;
+  marks?: ChartMark[];
   deleting?: boolean;
   selected?: boolean;
   onSelect?: () => void;
@@ -745,24 +822,17 @@ const StreamTile = memo(function StreamTile({
           }}
         />
       )}
-      <div className="flex items-start justify-between gap-2 pr-6">
-        <div className="min-w-0">
-          <div className="truncate font-mono text-sm">{stream.field_id}</div>
-          <div className="truncate text-[11px] text-muted-foreground">
-            {stream.source_file || "—"}
-          </div>
-        </div>
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="truncate font-mono text-[11px] text-muted-foreground">
-            score {stream.contribution.toFixed(2)}
-          </span>
-          <StatusChip status={stream.status} />
+      <div className="min-w-0 pr-6">
+        <div className="truncate font-mono text-sm">{stream.field_id}</div>
+        <div className="truncate text-[11px] text-muted-foreground">
+          {stream.source_file || "—"}
         </div>
       </div>
       <div className="mt-1 h-36">
         <StreamChart
           values={stream.sparkline}
           tick={tick}
+          marks={marks}
           className="h-36"
           accent="rgb(82, 82, 91)"
         />

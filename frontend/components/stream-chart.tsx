@@ -2,12 +2,18 @@
 
 import { memo, useEffect, useLayoutEffect, useRef } from "react";
 
+export type ChartMark = {
+  index: number;
+  level: "yellow" | "red";
+};
+
 type Props = {
   values: number[];
   tick?: number;
   className?: string;
   limit?: number;
   accent?: string;
+  marks?: ChartMark[];
 };
 
 function seriesEqual(a: number[], b: number[]) {
@@ -15,6 +21,15 @@ function seriesEqual(a: number[], b: number[]) {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) {
     if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+function marksEqual(a: ChartMark[] | undefined, b: ChartMark[] | undefined) {
+  if (a === b) return true;
+  if (!a || !b || a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].index !== b[i].index || a[i].level !== b[i].level) return false;
   }
   return true;
 }
@@ -62,15 +77,22 @@ function paint(
   series: number[],
   limit: number | undefined,
   accent: string,
+  marks: ChartMark[],
 ) {
   const ctx = canvas.getContext("2d", { alpha: true });
   if (!ctx) return;
-  const w = Math.max(1, wrap.clientWidth | 0);
-  const h = Math.max(1, wrap.clientHeight | 0);
-  if (canvas.width !== w || canvas.height !== h) {
-    canvas.width = w;
-    canvas.height = h;
+  const w = Math.max(1, wrap.clientWidth);
+  const h = Math.max(1, wrap.clientHeight);
+  const dpr = Math.max(1, window.devicePixelRatio || 1);
+  const bw = Math.max(1, Math.round(w * dpr));
+  const bh = Math.max(1, Math.round(h * dpr));
+  if (canvas.width !== bw || canvas.height !== bh) {
+    canvas.width = bw;
+    canvas.height = bh;
   }
+  canvas.style.width = `${w}px`;
+  canvas.style.height = `${h}px`;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
 
   const padL = 28;
@@ -105,15 +127,27 @@ function paint(
   ctx.strokeStyle = "rgba(255,255,255,0.08)";
   ctx.lineWidth = 1;
   for (const t of scale.ticks) {
-    const y = yOf(t);
+    const y = Math.round(yOf(t)) + 0.5;
     ctx.beginPath();
     ctx.moveTo(padL, y);
     ctx.lineTo(w - padR, y);
     ctx.stroke();
   }
 
+  for (const mark of marks) {
+    const x = Math.round(xOf(mark.index)) + 0.5;
+    ctx.beginPath();
+    ctx.strokeStyle = mark.level === "red" ? "rgb(248, 113, 113)" : "rgb(251, 191, 36)";
+    ctx.lineWidth = 1;
+    ctx.moveTo(x, padT);
+    ctx.lineTo(x, padT + plotH);
+    ctx.stroke();
+  }
+
   ctx.strokeStyle = accent;
   ctx.lineWidth = 1.25;
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
   ctx.beginPath();
   if (series.length) {
     ctx.moveTo(xOf(0), yOf(series[0]));
@@ -134,6 +168,7 @@ export const StreamChart = memo(
     className = "",
     limit,
     accent = "rgb(82, 82, 91)",
+    marks,
   }: Props) {
     const wrapRef = useRef<HTMLDivElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -141,15 +176,24 @@ export const StreamChart = memo(
     const valuesRef = useRef(values);
     const limitRef = useRef(limit);
     const accentRef = useRef(accent);
+    const marksRef = useRef(marks);
     valuesRef.current = values;
     limitRef.current = limit;
     accentRef.current = accent;
+    marksRef.current = marks;
 
     const draw = () => {
       const wrap = wrapRef.current;
       const canvas = canvasRef.current;
       if (!wrap || !canvas || !visibleRef.current) return;
-      paint(canvas, wrap, valuesRef.current, limitRef.current, accentRef.current);
+      paint(
+        canvas,
+        wrap,
+        valuesRef.current,
+        limitRef.current,
+        accentRef.current,
+        marksRef.current ?? [],
+      );
     };
 
     useEffect(() => {
@@ -173,7 +217,7 @@ export const StreamChart = memo(
 
     useLayoutEffect(() => {
       draw();
-    }, [values, limit, accent]);
+    }, [values, limit, accent, marks]);
 
     return (
       <div ref={wrapRef} className={`relative w-full ${className}`}>
@@ -186,5 +230,6 @@ export const StreamChart = memo(
     prev.limit === next.limit &&
     prev.accent === next.accent &&
     prev.tick === next.tick &&
-    seriesEqual(prev.values, next.values),
+    seriesEqual(prev.values, next.values) &&
+    marksEqual(prev.marks, next.marks),
 );
