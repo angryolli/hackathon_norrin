@@ -12,6 +12,14 @@ type Origin = { left: number; top: number; width: number; height: number };
 
 const SCALE = ["Untrusted", "Poor", "Fair", "Good", "Excellent"] as const;
 
+const SCALE_COLOR = {
+  Untrusted: { bar: "bg-red-400", dim: "bg-red-400/20", text: "text-red-300" },
+  Poor: { bar: "bg-orange-400", dim: "bg-orange-400/20", text: "text-orange-300" },
+  Fair: { bar: "bg-amber-400", dim: "bg-amber-400/20", text: "text-amber-300" },
+  Good: { bar: "bg-lime-400", dim: "bg-lime-400/20", text: "text-lime-300" },
+  Excellent: { bar: "bg-emerald-400", dim: "bg-emerald-400/20", text: "text-emerald-300" },
+} as const;
+
 function adjectiveIndex(value: string) {
   const i = SCALE.findIndex((row) => row.toLowerCase() === value.toLowerCase());
   return i >= 0 ? i : 2;
@@ -191,7 +199,7 @@ export function SourceModal({
                   </p>
                   <div>
                     <div className="flex items-center justify-between gap-2">
-                      <span>{quality.adjective}</span>
+                      <span className={SCALE_COLOR[SCALE[adjI]].text}>{quality.adjective}</span>
                       <span className="font-mono text-[11px] text-muted-foreground">
                         {(quality.confidence * 100).toFixed(0)}%
                       </span>
@@ -203,13 +211,20 @@ export function SourceModal({
                           title={label}
                           className={cn(
                             "h-1.5 flex-1 rounded-full",
-                            index <= adjI ? "bg-foreground/80" : "bg-muted",
+                            index <= adjI ? SCALE_COLOR[label].bar : SCALE_COLOR[label].dim,
                           )}
                         />
                       ))}
                     </div>
-                    <p className="mt-1 font-mono text-[10px] text-muted-foreground">
-                      Untrusted · Poor · Fair · Good · Excellent
+                    <p className="mt-1 flex flex-wrap font-mono text-[10px]">
+                      {SCALE.map((label, index) => (
+                        <span key={label}>
+                          <span className={SCALE_COLOR[label].text}>{label}</span>
+                          {index < SCALE.length - 1 ? (
+                            <span className="text-muted-foreground"> · </span>
+                          ) : null}
+                        </span>
+                      ))}
                     </p>
                   </div>
                   {quality.summary && (

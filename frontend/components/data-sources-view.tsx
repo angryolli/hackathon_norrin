@@ -1,6 +1,7 @@
 "use client";
 
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { Plus, RotateCcw, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -93,6 +94,8 @@ export function DataSourcesView() {
   } | null>(null);
   const ticksRef = useRef({ tick: -1, demo: -1, dataset: "", playing: false, fields: "" });
   const { setPlaying } = useSimulation();
+  const searchParams = useSearchParams();
+  const openedQuery = useRef(false);
 
   useEffect(() => {
     let on = true;
@@ -493,7 +496,7 @@ export function DataSourcesView() {
     };
   }, [idleFields, openKey, streams]);
 
-  function openSource(key: string, node: HTMLElement) {
+  const openSource = useCallback((key: string, node: HTMLElement) => {
     if (deleting) return;
     const rect = node.getBoundingClientRect();
     setOrigin({
@@ -503,7 +506,42 @@ export function DataSourcesView() {
       height: rect.height,
     });
     setOpenKey(key);
-  }
+  }, [deleting]);
+
+  useEffect(() => {
+    if (openedQuery.current || deleting) return;
+    const field = searchParams.get("field");
+    if (!field) return;
+    const source = searchParams.get("source") ?? "";
+    const exact = sourceKey(source, field);
+    const liveExact = streams.find(
+      (stream) => sourceKey(stream.source_id ?? "", stream.field_id) === exact,
+    );
+    const idleExact = idleFields.find((row) => row.key === exact);
+    const liveField = streams.find((stream) => stream.field_id === field);
+    const idleField = idleFields.find((row) => row.field_id === field);
+    const key = liveExact
+      ? exact
+      : idleExact
+        ? idleExact.key
+        : liveField
+          ? sourceKey(liveField.source_id ?? "", liveField.field_id)
+          : idleField?.key;
+    if (!key) return;
+    openedQuery.current = true;
+    const el = document.querySelector(`[data-source-key="${CSS.escape(key)}"]`);
+    if (el instanceof HTMLElement) {
+      openSource(key, el);
+      return;
+    }
+    setOpenKey(key);
+    setOrigin({
+      left: Math.max(24, window.innerWidth / 2 - 160),
+      top: 96,
+      width: 320,
+      height: 208,
+    });
+  }, [deleting, idleFields, openSource, searchParams, streams]);
 
   const allFieldKeys = useMemo(() => {
     const keys = streams.map((stream) => sourceKey(stream.source_id ?? "", stream.field_id));
@@ -598,6 +636,7 @@ export function DataSourcesView() {
           {idleFields.map((field) => (
             <StreamTile
               key={field.key}
+              tileKey={field.key}
               stream={{
                 field_id: field.field_id,
                 sparkline: [],
@@ -618,6 +657,7 @@ export function DataSourcesView() {
             return (
               <StreamTile
                 key={key}
+                tileKey={key}
                 stream={stream}
                 tick={snap?.tick}
                 marks={marksForStream(stream, snap?.tick, signals)}
@@ -873,6 +913,7 @@ export function DataSourcesView() {
 const STREAM_CARD = "box-border h-52 min-w-0 rounded-xl border bg-card p-2";
 
 const StreamTile = memo(function StreamTile({
+  tileKey,
   stream,
   tick,
   marks,
@@ -881,6 +922,7 @@ const StreamTile = memo(function StreamTile({
   onSelect,
   onOpen,
 }: {
+  tileKey: string;
   stream: FieldCard;
   tick?: number;
   marks?: ChartMark[];
@@ -891,6 +933,7 @@ const StreamTile = memo(function StreamTile({
 }) {
   return (
     <div
+      data-source-key={tileKey}
       role={deleting ? undefined : "button"}
       className={cn(
         STREAM_CARD,

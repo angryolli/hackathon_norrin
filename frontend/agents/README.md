@@ -5,7 +5,7 @@ Two Node-side agents in this Next.js process. They do not import each other.
 | | Operator | System |
 |---|---|---|
 | Folder | `agents/operator` | `agents/system` |
-| Where | `/agent` chat | System Monitor → **Launch system agent** |
+| Where | `/agent` chat | System Dashboard → **Launch system agent** |
 | Trigger | Operator sends a message | Manual cycle (demo). Same `runCycle()` will be on a timer for 24/7 later. |
 | Job | Human-in-the-loop language | Autonomous pipeline |
 
@@ -13,7 +13,7 @@ Two Node-side agents in this Next.js process. They do not import each other.
 
 Plain-language interface. The operator asks why a flag fired, challenges a conclusion, or pastes a rule in words. The model only answers from diagnosis artifacts and the decision log. It does not generate the understanding report, quality report, or root-cause diagnosis on its own.
 
-Human **accept / question / override** lives on Reports & Logs (Review), not in this chat. Questioning in prose still happens here.
+Human **accept / question / override** lives on System Dashboard (Judgment). Questions also open this chat.
 
 ## System (`agents/system`)
 
@@ -31,11 +31,11 @@ Demo scheduler: launch runs **one cycle** then stops (no token burn). Continuous
 
 | Expected output | Owner | Where you look |
 |---|---|---|
-| 1 Sensor understanding report | System agent | System Monitor → click a source |
-| 2 Data quality checks | System agent | System Monitor → click a source (that field only) |
-| 3 Drift / anomaly | Compute plane + system narration | Reports & Logs → Drift |
-| 4 Root-cause diagnosis | System agent (+ critique) | System Monitor → Root cause |
-| 5 Human review | Operator (controls) | Reports & Logs → Review; questions also `/agent` |
+| 1 Sensor understanding report | System agent | Telemetry → click a source |
+| 2 Data quality checks | System agent | Telemetry → click a source (that field only) |
+| 3 Drift / anomaly | Compute plane + system narration | System Dashboard → Alerts (inspect stream on Telemetry) |
+| 4 Root-cause diagnosis | System agent (+ critique) | System Dashboard → Root cause |
+| 5 Human review | Operator (controls) | System Dashboard → Judgment; questions also `/agent` |
 | 6 Decision log | Both (model calls + overrides) | Reports & Logs → Decision log |
 | 7 Adaptability | Architecture (unlabeled columns, source `kind`) | Reports & Logs → Data flow |
 | 8 Data-flow record | Node LLM layer | Reports & Logs → Data flow |

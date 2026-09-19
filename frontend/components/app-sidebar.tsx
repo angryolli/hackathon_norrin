@@ -4,8 +4,9 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
+  Activity,
   ChevronsLeft,
-  Gauge,
+  LayoutDashboard,
   MessageSquare,
   PanelLeft,
   Pause,
@@ -20,7 +21,8 @@ import { browserGet, type DataSource, type RuntimeConfig } from "@/lib/browser-a
 import { useSimulation } from "@/components/simulation-context";
 
 const NAV = [
-  { href: "/", label: "System Monitor", icon: Gauge },
+  { href: "/", label: "System Dashboard", icon: LayoutDashboard },
+  { href: "/telemetry", label: "Telemetry", icon: Activity },
   { href: "/agent", label: "Agent", icon: MessageSquare },
   { href: "/reports", label: "Reports & Logs", icon: ScrollText },
 ];

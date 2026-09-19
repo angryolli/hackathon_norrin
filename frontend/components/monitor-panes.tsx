@@ -1,8 +1,9 @@
 "use client";
 
 import { Activity, Check, HelpCircle, ShieldAlert } from "lucide-react";
+import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -18,6 +19,16 @@ import type { DiagnosisSignal, DiagnosisSnapshot } from "@/lib/pipeline";
 export function fieldLabel(id: string) {
   const sep = id.indexOf("::");
   return sep >= 0 ? id.slice(sep + 2) : id;
+}
+
+export function telemetryHref(fieldId: string) {
+  const sep = fieldId.indexOf("::");
+  const source = sep >= 0 ? fieldId.slice(0, sep) : "";
+  const field = sep >= 0 ? fieldId.slice(sep + 2) : fieldId;
+  const q = new URLSearchParams();
+  if (source) q.set("source", source);
+  q.set("field", field);
+  return `/telemetry?${q.toString()}`;
 }
 
 export function fmt(value: number | null | undefined) {
@@ -186,7 +197,7 @@ export function ReportPane({
       ) : (
         !running && (
           <p className="text-sm text-muted-foreground">
-            Nothing yet. Launch system agent on System Monitor for one cycle.
+            Nothing yet. Launch the system agent on System Dashboard for one cycle.
           </p>
         )
       )}
@@ -210,7 +221,7 @@ export function DriftPane({
   return (
     <div className="mx-auto max-w-3xl space-y-3">
       <div>
-        <h2 className="text-sm font-medium">Drift and anomalies</h2>
+        <h2 className="text-sm font-medium">Alerts</h2>
         <p className="mt-1 font-mono text-xs text-muted-foreground">
           {current
             ? `tick ${current.tick} · S=${fmt(current.score)} · z=${fmt(current.z)} · ${
@@ -219,8 +230,7 @@ export function DriftPane({
             : "Waiting for the stream."}
         </p>
         <p className="mt-1 text-sm text-muted-foreground">
-          Expanding-moment flags from the compute plane. Attribution is per field, not an aggregate
-          score alone.
+          Yellow and red expanding-moment flags. Open a field in Telemetry to inspect the stream.
         </p>
       </div>
       {signals.length === 0 && (
@@ -253,15 +263,33 @@ export function DriftPane({
                 <ol className="list-decimal space-y-1 pl-4 font-mono text-xs">
                   {row.top_fields.map((field) => (
                     <li key={field.field_id}>
-                      {fieldLabel(field.field_id)} · score {fmt(field.score)} · mean{" "}
-                      {fmt(field.mean)} · sd {fmt(field.sd)} · skew {fmt(field.skew)} · kurt{" "}
-                      {fmt(field.kurt)}
+                      <Link
+                        href={telemetryHref(field.field_id)}
+                        className="underline-offset-2 hover:underline"
+                      >
+                        {fieldLabel(field.field_id)}
+                      </Link>
+                      {" · score "}
+                      {fmt(field.score)} · mean {fmt(field.mean)} · sd {fmt(field.sd)} · skew{" "}
+                      {fmt(field.skew)} · kurt {fmt(field.kurt)}
                     </li>
                   ))}
                 </ol>
-                <Button size="sm" variant="outline" onClick={() => onAsk(row.id)}>
-                  Ask operator
-                </Button>
+                <div className="flex flex-wrap gap-2">
+                  <Button size="sm" variant="outline" onClick={() => onAsk(row.id)}>
+                    Ask operator
+                  </Button>
+                  <Link
+                    href={
+                      row.top_fields[0]
+                        ? telemetryHref(row.top_fields[0].field_id)
+                        : "/telemetry"
+                    }
+                    className={buttonVariants({ variant: "outline", size: "sm" })}
+                  >
+                    Inspect in Telemetry
+                  </Link>
+                </div>
               </div>
             )}
           </CardContent>
@@ -308,7 +336,7 @@ export function FlowPane({ flow }: { flow: DataFlowRecord }) {
           <dt className="text-xs text-muted-foreground">Adaptability</dt>
           <dd>
             Sources are unlabeled columns with a kind of process, business, or other. The moment
-            detector and these reports never require TEP names. A second CSV under Sources is the
+            detector and these reports never require TEP names. A second CSV under Telemetry is the
             same pipeline.
           </dd>
         </div>
@@ -337,10 +365,11 @@ export function ReviewPane({
   return (
     <div className="mx-auto max-w-3xl space-y-4">
       <div>
-        <h2 className="text-sm font-medium">Human review</h2>
+        <h2 className="text-sm font-medium">Judgment</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Accept, question, or override the latest system conclusion. Questions open the operator
-          chat. Every action is written to the decision log.
+          Accept, question, or override the latest system conclusion. Everything on this dashboard
+          is in front of you. Questions open the operator chat. Every action is written to the
+          decision log.
         </p>
       </div>
       <p className="font-mono text-xs text-muted-foreground">
