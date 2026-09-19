@@ -36,6 +36,7 @@ class RuntimeConfig(BaseModel):
     calibration_id: str | None = None
     baseline_established: bool = False
     no_egress: bool = False
+    demo_data_uri: str = ""
 
 
 class ConfigUpdate(BaseModel):
@@ -61,8 +62,8 @@ class DataSource(BaseModel):
     name: str
     kind: Literal["process", "business", "other"] = "process"
     description: str = ""
-    generator: Literal["industrial", "expenses"] = "industrial"
-    origin: Literal["generator", "api", "file"] = "generator"
+    generator: str = ""
+    origin: Literal["api", "file"] = "file"
     api_url: str = ""
     file_path: str = ""
     train_path: str = ""
@@ -73,25 +74,19 @@ class DataSource(BaseModel):
 
 
 class DataSourceCreate(BaseModel):
-    name: str
-    kind: Literal["process", "business", "other"] = "process"
-    description: str = ""
-    generator: Literal["industrial", "expenses"] | None = None
-    origin: Literal["generator", "api", "file"] = "generator"
+    origin: Literal["api", "file"] = "file"
     api_url: str = ""
+    file_path: str = ""
 
 
 class DataSourceFileCreate(BaseModel):
-    name: str = ""
-    filename: str
-    content_b64: str
+    path: str
 
 
 class DataSourceUpdate(BaseModel):
     name: str | None = None
     kind: Literal["process", "business", "other"] | None = None
     description: str | None = None
-    generator: Literal["industrial", "expenses"] | None = None
 
 
 class FieldProfile(BaseModel):
@@ -276,11 +271,12 @@ class MonitorSnapshot(BaseModel):
     t2_series: list[float] = Field(default_factory=list, max_length=60)
     control_limit: float = 0.0
     live_boundary: int = 0
-    fields: list[FieldCard] = Field(default_factory=list, max_length=40)
+    fields: list[FieldCard] = Field(default_factory=list, max_length=80)
     demo_fields: list[FieldCard] = Field(default_factory=list, max_length=80)
     demo_tick: int = 0
     exclusion_list: list[str] = Field(default_factory=list, max_length=20)
     latest_event_id: str | None = None
+    demo_data_uri: str = ""
     evidence: str = "Monitor snapshot is aggregated windows, not raw row dumps."
 
 

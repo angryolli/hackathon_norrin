@@ -16,12 +16,13 @@ import { cn } from "@/lib/utils";
 
 type OriginChoice = "api" | "file" | null;
 
+const DEMO_URI = (process.env.NEXT_PUBLIC_DEMO_DATA_URI ?? "").trim();
+
 export function DataSourcesView() {
   const [adding, setAdding] = useState(false);
   const [choice, setChoice] = useState<OriginChoice>(null);
-  const [name, setName] = useState("");
   const [apiUrl, setApiUrl] = useState("");
-  const [file, setFile] = useState<File | null>(null);
+  const [filePath, setFilePath] = useState(DEMO_URI);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [snap, setSnap] = useState<MonitorSnapshot | null>(null);
@@ -33,17 +34,15 @@ export function DataSourcesView() {
 
     function apply(data: MonitorSnapshot) {
       if (!on) return;
-      const demoTick = data.demo_tick ?? 0;
       if (
         data.tick === ticksRef.current.tick &&
-        demoTick === ticksRef.current.demo &&
         data.dataset_id === ticksRef.current.dataset
       ) {
         return;
       }
       ticksRef.current = {
         tick: data.tick,
-        demo: demoTick,
+        demo: data.tick,
         dataset: data.dataset_id,
       };
       setSnap(data);
@@ -59,6 +58,13 @@ export function DataSourcesView() {
           /* ignore malformed frames */
         }
       });
+      source.onmessage = (event) => {
+        try {
+          apply(JSON.parse(event.data) as MonitorSnapshot);
+        } catch {
+          /* ignore malformed frames */
+        }
+      };
     }
 
     function onVis() {
@@ -91,9 +97,8 @@ export function DataSourcesView() {
   function closeModal() {
     setAdding(false);
     setChoice(null);
-    setName("");
     setApiUrl("");
-    setFile(null);
+    setFilePath(DEMO_URI || snap?.demo_data_uri || "");
     setError(null);
   }
 
@@ -107,20 +112,16 @@ export function DataSourcesView() {
           return;
         }
         await browserPost("/data-sources/api", {
-          name: name.trim() || "API source",
           origin: "api",
           api_url: apiUrl.trim(),
         });
       } else if (choice === "file") {
-        if (!file) {
-          setError("Choose a CSV or Excel file");
+        if (!filePath.trim()) {
+          setError("File path is required");
           return;
         }
-        const content_b64 = await fileToBase64(file);
         await browserPost("/data-sources/file", {
-          name: name.trim() || file.name.replace(/\.[^.]+$/, ""),
-          filename: file.name,
-          content_b64,
+          path: filePath.trim(),
         });
       } else {
         return;
@@ -134,16 +135,13 @@ export function DataSourcesView() {
   }
 
   const streams = useMemo(() => {
-    const fakeStreams = [...(snap?.fields ?? [])].sort((a, b) => {
+    return [...(snap?.fields ?? [])].sort((a, b) => {
       const an = Number.parseInt(a.field_id.replace(/\D/g, ""), 10);
       const bn = Number.parseInt(b.field_id.replace(/\D/g, ""), 10);
       const av = Number.isFinite(an) ? an : Number.POSITIVE_INFINITY;
       const bv = Number.isFinite(bn) ? bn : Number.POSITIVE_INFINITY;
       return av !== bv ? av - bv : a.field_id.localeCompare(b.field_id);
     });
-    const demoStreams = snap?.demo_fields ?? [];
-    const demoIds = new Set(demoStreams.map((d) => d.field_id));
-    return { items: [...fakeStreams, ...demoStreams], demoIds };
   }, [snap]);
 
   return (
@@ -163,13 +161,11 @@ export function DataSourcesView() {
             <Plus className="size-8" strokeWidth={1.5} />
           </div>
         </button>
-        {streams.items.map((stream) => (
+        {streams.map((stream) => (
           <StreamTile
             key={`${snap?.dataset_id ?? "src"}:${stream.field_id}`}
             stream={stream}
-            tick={
-              streams.demoIds.has(stream.field_id) ? snap?.demo_tick : snap?.tick
-            }
+            tick={snap?.tick}
           />
         ))}
       </div>
@@ -214,7 +210,10 @@ export function DataSourcesView() {
               </button>
               <button
                 type="button"
-                onClick={() => setChoice("file")}
+                onClick={() => {
+                  setChoice("file");
+                  setFilePath((current) => current.trim() || snap?.demo_data_uri || DEMO_URI);
+                }}
                 className={cn(
                   "rounded-xl border px-3 py-6 text-sm transition-colors",
                   choice === "file"
@@ -227,17 +226,9 @@ export function DataSourcesView() {
             </div>
             {choice && (
               <div className="mt-4 space-y-3">
-                <label className="block space-y-1 text-xs text-muted-foreground">
-                  <span>Name</span>
-                  <Input
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder={choice === "file" ? "From file name if empty" : "API source"}
-                  />
-                </label>
                 {choice === "api" ? (
                   <label className="block space-y-1 text-xs text-muted-foreground">
-                    <span>API URL</span>
+                    <span>URL</span>
                     <Input
                       value={apiUrl}
                       onChange={(e) => setApiUrl(e.target.value)}
@@ -246,11 +237,11 @@ export function DataSourcesView() {
                   </label>
                 ) : (
                   <label className="block space-y-1 text-xs text-muted-foreground">
-                    <span>File</span>
+                    <span>File path</span>
                     <Input
-                      type="file"
-                      accept=".csv,.txt,.xlsx,.xls,.xlsm,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                      onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                      value={filePath}
+                      onChange={(e) => setFilePath(e.target.value)}
+                      placeholder="/path/to/data.csv"
                     />
                   </label>
                 )}
@@ -301,16 +292,3 @@ const StreamTile = memo(function StreamTile({
     </div>
   );
 });
-
-function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const text = String(reader.result ?? "");
-      const comma = text.indexOf(",");
-      resolve(comma >= 0 ? text.slice(comma + 1) : text);
-    };
-    reader.onerror = () => reject(reader.error ?? new Error("read failed"));
-    reader.readAsDataURL(file);
-  });
-}

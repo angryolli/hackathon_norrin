@@ -105,3 +105,19 @@ def write_csv(df: pd.DataFrame, dest: Path) -> Path:
     dest.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(dest, index=False)
     return dest
+
+
+def materialize_csv(path: Path, dest: Path | None = None) -> Path:
+    """Return a CSV path for disk replay. Excel is converted once; CSV is used in place."""
+    resolved = path.expanduser().resolve()
+    if not resolved.is_file():
+        raise ValueError(f"file not found: {path}")
+    suffix = resolved.suffix.lower()
+    if suffix in CSV_SUFFIXES:
+        return resolved
+    if suffix in EXCEL_SUFFIXES:
+        target = dest or resolved.with_suffix(".csv")
+        frame = dataframe_from_bytes(resolved.name, resolved.read_bytes())
+        write_csv(frame, target)
+        return target
+    raise ValueError("expected a .csv or Excel file")

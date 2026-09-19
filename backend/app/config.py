@@ -30,45 +30,14 @@ def _load_dotenv() -> None:
 
 _load_dotenv()
 
-DEFAULT_DATA_SOURCES = [
-    {
-        "id": "industrial_stream",
-        "name": "Industrial stream",
-        "kind": "process",
-        "description": "Unlabeled process variables from a continuous plant stream.",
-        "generator": "industrial",
-        "origin": "generator",
-        "api_url": "",
-        "file_path": "",
-        "train_path": str(DATA_DIR / "train.csv"),
-        "live_path": str(DATA_DIR / "test.csv"),
-    },
-    {
-        "id": "expenses",
-        "name": "Expenses",
-        "kind": "business",
-        "description": "Business expense records for a second domain.",
-        "generator": "expenses",
-        "origin": "generator",
-        "api_url": "",
-        "file_path": "",
-        "train_path": str(DATA_DIR / "second_domain.csv"),
-        "live_path": str(DATA_DIR / "second_domain_live.csv"),
-    },
-]
-DATASETS = {s["id"]: s for s in DEFAULT_DATA_SOURCES}
-
 TICK_SECONDS = float(os.getenv("STREAM_TICK_SECONDS", "0.45"))
 LIVE_BUFFER = int(os.getenv("LIVE_BUFFER", "400"))
 SPARKLINE_POINTS = 100
+CALIBRATE_ROWS = 500
 MAX_ARTIFACT_BYTES = 20_000
 TOP_CORR_PAIRS = 20
 TOP_RANK = 10
 PCA_MAX_COMPONENTS = 5
-
-
-def default_dataset() -> str:
-    return os.getenv("DATASET_ID", "industrial_stream")
 
 
 def demo_data_path() -> Path | None:
@@ -82,3 +51,32 @@ def demo_data_path() -> Path | None:
     if path.is_file():
         return path
     return None
+
+
+def default_data_sources() -> list[dict]:
+    path = demo_data_path()
+    if path is None:
+        return []
+    resolved = str(path)
+    return [
+        {
+            "id": "demo_csv",
+            "name": path.stem,
+            "kind": "process",
+            "description": f"Disk replay {resolved}",
+            "generator": "",
+            "origin": "file",
+            "api_url": "",
+            "file_path": resolved,
+            "train_path": resolved,
+            "live_path": resolved,
+        }
+    ]
+
+
+DEFAULT_DATA_SOURCES = default_data_sources()
+DATASETS = {s["id"]: s for s in DEFAULT_DATA_SOURCES}
+
+
+def default_dataset() -> str:
+    return os.getenv("DATASET_ID", "demo_csv")

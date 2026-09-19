@@ -58,6 +58,7 @@ export type MonitorSnapshot = {
   demo_tick?: number;
   exclusion_list: string[];
   latest_event_id: string | null;
+  demo_data_uri?: string;
   evidence: string;
 };
 
@@ -66,8 +67,7 @@ export type DataSource = {
   name: string;
   kind: "process" | "business" | "other";
   description: string;
-  generator: "industrial" | "expenses";
-  origin: "generator" | "api" | "file";
+  origin: "api" | "file";
   api_url: string;
   file_path: string;
   train_path: string;
@@ -83,6 +83,7 @@ export type RuntimeConfig = {
   calibration_id: string | null;
   baseline_established: boolean;
   no_egress: boolean;
+  demo_data_uri?: string;
 };
 
 export type ChatSummary = {

@@ -197,12 +197,12 @@ export function AppSidebar() {
                 <span className="text-xs text-muted-foreground">Active data source</span>
                 <select
                   className="h-8 w-full rounded-md border border-input bg-background px-2 font-mono text-xs"
-                  value={cfg?.dataset_id ?? "industrial_stream"}
+                  value={cfg?.dataset_id ?? sources[0]?.id ?? ""}
                   onChange={(e) => void setDataset(e.target.value)}
                 >
                   {(sources.length
                     ? sources
-                    : (cfg?.datasets ?? ["industrial_stream", "expenses"]).map((id) => ({
+                    : (cfg?.datasets ?? []).map((id) => ({
                         id,
                         name: id,
                       }))

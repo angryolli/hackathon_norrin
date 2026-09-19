@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Lock
 
+import pandas as pd
+
 from app.config import SPARKLINE_POINTS
 
 _SKIP_NAME = re.compile(r"(fault|label|idv|class|target|^source$|^run$|^sample$|^unnamed)", re.I)
@@ -82,6 +84,17 @@ class DiskReplaySource:
                 (col, list(self.sparklines.get(col, ())))
                 for col in self.numeric_cols
             ]
+
+    def latest_batch(self, n: int = 40) -> pd.DataFrame:
+        with self.lock:
+            cols = list(self.numeric_cols)
+            data = {col: list(self.sparklines.get(col, ()))[-n:] for col in cols}
+        if not cols:
+            return pd.DataFrame()
+        length = min((len(values) for values in data.values()), default=0)
+        if length == 0:
+            return pd.DataFrame(columns=cols)
+        return pd.DataFrame({col: values[-length:] for col, values in data.items()})
 
     def close(self) -> None:
         with self.lock:

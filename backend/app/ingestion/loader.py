@@ -51,8 +51,8 @@ def detect_schema(df: pd.DataFrame) -> DetectedSchema:
     )
 
 
-def load_csv(path: str) -> pd.DataFrame:
-    return pd.read_csv(path)
+def load_csv(path: str, nrows: int | None = 500) -> pd.DataFrame:
+    return pd.read_csv(path, nrows=nrows)
 
 
 def process_frame(df: pd.DataFrame) -> tuple[pd.DataFrame, DetectedSchema]:

@@ -48,6 +48,16 @@ async def lifespan(_app: FastAPI):
     try:
         yield
     finally:
+        for queue in list(_subscribers):
+            if queue.full():
+                try:
+                    queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    pass
+            try:
+                queue.put_nowait(None)
+            except asyncio.QueueFull:
+                pass
         task.cancel()
         try:
             await task
@@ -55,7 +65,7 @@ async def lifespan(_app: FastAPI):
             pass
 
 
-_subscribers: set[asyncio.Queue[MonitorSnapshot]] = set()
+_subscribers: set[asyncio.Queue[MonitorSnapshot | None]] = set()
 
 
 async def _stream() -> None:
@@ -106,10 +116,11 @@ app.add_middleware(
 
 @app.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
+    tick = STATE.source.tick if STATE.source is not None else 0
     return HealthResponse(
         status="ok",
-        stream_tick=STATE.source.tick,
-        live_rows=len(STATE.source.live),
+        stream_tick=tick,
+        live_rows=tick,
     )
 
 
@@ -133,39 +144,26 @@ def data_sources_list() -> list[DataSource]:
 
 @app.post("/data-sources", response_model=DataSource)
 def data_sources_create(body: DataSourceCreate) -> DataSource:
-    if not body.name.strip():
-        raise HTTPException(400, "name is required")
-    if body.origin == "api":
-        try:
-            return STATE.add_api_source(body.name, body.api_url)
-        except ValueError as exc:
-            raise HTTPException(400, str(exc)) from exc
-    return STATE.add_data_source(body)
+    try:
+        return STATE.add_data_source(body)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @app.post("/data-sources/api", response_model=DataSource)
 def data_sources_api(body: DataSourceCreate) -> DataSource:
     try:
-        return STATE.add_api_source(body.name, body.api_url)
+        return STATE.add_api_source(body.api_url)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
 
 @app.post("/data-sources/file", response_model=DataSource)
 def data_sources_file(body: DataSourceFileCreate) -> DataSource:
-    import base64
-
-    if not body.content_b64:
-        raise HTTPException(400, "empty file")
+    if not body.path.strip():
+        raise HTTPException(400, "file path is required")
     try:
-        raw = base64.b64decode(body.content_b64)
-    except Exception as exc:
-        raise HTTPException(400, "invalid file encoding") from exc
-    if not raw:
-        raise HTTPException(400, "empty file")
-    filename = body.filename or "upload.csv"
-    try:
-        return STATE.add_file_source(body.name, filename, raw)
+        return STATE.add_file_source(body.path)
     except Exception as exc:
         raise HTTPException(400, str(exc)) from exc
 
@@ -279,12 +277,17 @@ def monitor() -> MonitorSnapshot:
 @app.get("/monitor/stream")
 async def monitor_stream() -> StreamingResponse:
     async def events():
-        queue: asyncio.Queue[MonitorSnapshot] = asyncio.Queue(maxsize=1)
+        queue: asyncio.Queue[MonitorSnapshot | None] = asyncio.Queue(maxsize=1)
         _subscribers.add(queue)
         try:
             yield _sse_snapshot(STATE.monitor())
             while True:
-                snap = await queue.get()
+                try:
+                    snap = await asyncio.wait_for(queue.get(), timeout=1.0)
+                except asyncio.TimeoutError:
+                    continue
+                if snap is None:
+                    break
                 yield _sse_snapshot(snap)
         finally:
             _subscribers.discard(queue)
