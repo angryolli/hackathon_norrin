@@ -152,14 +152,11 @@ export function DataSourcesView() {
           onClick={() => setAdding(true)}
           className={cn(
             STREAM_CARD,
-            "flex appearance-none flex-col border-dashed text-muted-foreground transition-colors hover:border-foreground/40 hover:text-foreground",
+            "flex appearance-none items-center justify-center border-dashed text-muted-foreground transition-colors hover:border-foreground/40 hover:text-foreground",
           )}
           aria-label="Add data source"
         >
-          <div className="h-7" />
-          <div className="mt-1 flex h-28 items-center justify-center">
-            <Plus className="size-8" strokeWidth={1.5} />
-          </div>
+          <Plus className="size-8" strokeWidth={1.5} />
         </button>
         {streams.map((stream) => (
           <StreamTile
@@ -258,7 +255,7 @@ export function DataSourcesView() {
   );
 }
 
-const STREAM_CARD = "box-border h-40 min-w-0 rounded-xl border bg-card p-2";
+const STREAM_CARD = "box-border h-48 min-w-0 rounded-xl border bg-card p-2";
 
 const StreamTile = memo(function StreamTile({
   stream,
@@ -270,7 +267,7 @@ const StreamTile = memo(function StreamTile({
   return (
     <div
       className={STREAM_CARD}
-      style={{ contentVisibility: "auto", containIntrinsicSize: "auto 10rem" }}
+      style={{ contentVisibility: "auto", containIntrinsicSize: "auto 12rem" }}
     >
       <div className="flex h-7 items-center justify-between gap-2">
         <span className="font-mono text-sm">{stream.field_id}</span>
@@ -281,11 +278,11 @@ const StreamTile = memo(function StreamTile({
           <StatusChip status={stream.status} />
         </div>
       </div>
-      <div className="mt-1 h-28">
+      <div className="mt-1 h-36">
         <StreamChart
           values={stream.sparkline}
           tick={tick}
-          className="h-28"
+          className="h-36"
           accent="rgb(82, 82, 91)"
         />
       </div>
