@@ -26,8 +26,6 @@ export async function getConfig() {
     calibration_id: string | null;
     baseline_established: boolean;
     no_egress: boolean;
-    llm_backend: string;
-    llm_model: string;
   }>("/config");
 }
 

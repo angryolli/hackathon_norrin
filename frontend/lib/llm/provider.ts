@@ -1,21 +1,43 @@
 import { createHash } from "node:crypto";
-import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
 import type { LanguageModel } from "ai";
 
-type Backend = "anthropic" | "local";
+const MODEL_ID = "mistralai/Mistral-Large-3-675B-Instruct-2512-NVFP4";
 
 type Runtime = {
   noEgress: boolean;
-  backend: Backend;
-  modelId: string;
 };
 
 const runtime: Runtime = {
   noEgress: process.env.NO_EGRESS === "true",
-  backend: (process.env.LLM_BACKEND as Backend) || "local",
-  modelId: process.env.LLM_MODEL || "gpt-4o-mini",
 };
+
+function unwrapBaseUrl(raw: string) {
+  let url = raw.trim();
+  try {
+    const parsed = new URL(url);
+    if (
+      parsed.hostname.endsWith("safelinks.protection.outlook.com") &&
+      parsed.searchParams.get("url")
+    ) {
+      url = parsed.searchParams.get("url") ?? url;
+    }
+  } catch {
+    /* keep raw */
+  }
+  return url.replace(/\/+$/, "");
+}
+
+export function openaiCompatBaseURL() {
+  const raw = process.env.OPENAI_BASE_URL;
+  if (!raw) throw new Error("OPENAI_BASE_URL missing");
+  return unwrapBaseUrl(raw).replace(/\/chat\/completions$/i, "");
+}
+
+export function openaiCompletionsURL() {
+  const base = openaiCompatBaseURL();
+  return `${base}/chat/completions`;
+}
 
 function assertLocal(url: string) {
   try {
@@ -30,44 +52,27 @@ function assertLocal(url: string) {
 }
 
 export function getRuntime() {
-  return { ...runtime };
+  return {
+    ...runtime,
+    provider: "openai-compatible" as const,
+    modelId: MODEL_ID,
+  };
 }
 
 export function setRuntime(patch: Partial<Runtime>) {
   if (patch.noEgress !== undefined) runtime.noEgress = patch.noEgress;
-  if (patch.backend) runtime.backend = patch.backend;
-  if (patch.modelId) runtime.modelId = patch.modelId;
-  if (runtime.noEgress) runtime.backend = "local";
 }
 
 export class LLMProvider {
-  readonly backend: Backend;
-  readonly modelId: string;
+  readonly modelId = MODEL_ID;
   readonly model: LanguageModel;
 
   constructor() {
-    const cfg = getRuntime();
-    this.backend = cfg.noEgress ? "local" : cfg.backend;
-    this.modelId = cfg.modelId;
-    if (cfg.noEgress) {
-      const url = process.env.OPENAI_BASE_URL || "http://127.0.0.1:11434/v1";
-      assertLocal(url);
-    }
-    if (this.backend === "anthropic") {
-      const key = process.env.ANTHROPIC_API_KEY;
-      if (!key) throw new Error("ANTHROPIC_API_KEY missing");
-      this.model = createAnthropic({ apiKey: key })(
-        process.env.ANTHROPIC_MODEL || "claude-sonnet-4-5",
-      );
-      this.modelId = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-5";
-      return;
-    }
-    const url = process.env.OPENAI_BASE_URL || "http://127.0.0.1:11434/v1";
-    if (cfg.noEgress) assertLocal(url);
-    this.model = createOpenAI({
-      apiKey: process.env.OPENAI_API_KEY || "local",
-      baseURL: url,
-    })(this.modelId);
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) throw new Error("OPENAI_API_KEY missing");
+    const baseURL = openaiCompatBaseURL();
+    if (getRuntime().noEgress) assertLocal(baseURL);
+    this.model = createOpenAI({ apiKey, baseURL }).chat(MODEL_ID);
   }
 }
 

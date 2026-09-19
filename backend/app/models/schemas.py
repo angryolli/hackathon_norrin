@@ -36,15 +36,11 @@ class RuntimeConfig(BaseModel):
     calibration_id: str | None = None
     baseline_established: bool = False
     no_egress: bool = False
-    llm_backend: str = "unknown"
-    llm_model: str = "unknown"
 
 
 class ConfigUpdate(BaseModel):
     dataset_id: str | None = None
     no_egress: bool | None = None
-    llm_backend: str | None = None
-    llm_model: str | None = None
 
 
 class CalibrateRequest(BaseModel):

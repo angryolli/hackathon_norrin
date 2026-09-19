@@ -18,7 +18,6 @@ async function logCall(agent: string, tools: string[], sent: unknown) {
     type: "model_call",
     payload: {
       agent,
-      backend: provider.backend,
       model: provider.modelId,
       tools,
       bytes: JSON.stringify(sent).length,

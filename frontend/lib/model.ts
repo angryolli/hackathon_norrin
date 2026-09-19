@@ -1,23 +1,13 @@
-import { createOpenAI } from "@ai-sdk/openai";
+import { LLMProvider, openaiCompatBaseURL } from "@/lib/llm/provider";
 
 export function getModel() {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    throw new Error("OPENAI_API_KEY is missing in frontend/.env");
-  }
-
-  const openai = createOpenAI({
-    apiKey,
-    baseURL: process.env.OPENAI_BASE_URL || undefined,
-  });
-
-  return openai(process.env.LLM_MODEL ?? "gpt-4o-mini");
+  return new LLMProvider().model;
 }
 
 export function modelMeta() {
   return {
     provider: "openai-compatible",
-    model: process.env.LLM_MODEL ?? "gpt-4o-mini",
-    baseURL: process.env.OPENAI_BASE_URL ?? "https://api.openai.com/v1",
+    model: new LLMProvider().modelId,
+    baseURL: openaiCompatBaseURL(),
   };
 }

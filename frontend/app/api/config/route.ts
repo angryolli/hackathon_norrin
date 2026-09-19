@@ -11,20 +11,14 @@ export async function POST(request: Request) {
   const body = (await request.json()) as {
     dataset_id?: string;
     no_egress?: boolean;
-    llm_backend?: "anthropic" | "local";
   };
-  if (body.no_egress !== undefined || body.llm_backend) {
-    setRuntime({
-      noEgress: body.no_egress,
-      backend: body.llm_backend,
-    });
+  if (body.no_egress !== undefined) {
+    setRuntime({ noEgress: body.no_egress });
   }
   const runtime = getRuntime();
   const pipeline = await postConfig({
     dataset_id: body.dataset_id,
     no_egress: runtime.noEgress,
-    llm_backend: runtime.backend,
-    llm_model: runtime.modelId,
   });
   return NextResponse.json({ pipeline, node: runtime });
 }

@@ -48,8 +48,6 @@ export function AppSidebar() {
         calibration_id: data.calibration_id,
         baseline_established: data.baseline_established,
         no_egress: data.node?.noEgress ?? data.no_egress,
-        llm_backend: data.node?.backend ?? data.llm_backend,
-        llm_model: data.node?.modelId ?? data.llm_model,
       });
     } catch {
       setCfg(null);
@@ -84,15 +82,6 @@ export function AppSidebar() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ no_egress: !cfg?.no_egress }),
-    });
-    await refresh();
-  }
-
-  async function setBackend(llm_backend: "anthropic" | "local") {
-    await fetch("/api/config", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ llm_backend }),
     });
     await refresh();
   }
@@ -194,19 +183,8 @@ export function AppSidebar() {
             <p className="font-mono text-xs text-muted-foreground">
               Calibration {cfg?.baseline_established ? "frozen" : "none"}
             </p>
-            <label className="block space-y-1">
-              <span className="text-xs text-muted-foreground">LLM backend</span>
-              <select
-                className="h-8 w-full rounded-md border border-input bg-background px-2 font-mono text-xs"
-                value={cfg?.no_egress ? "local" : (cfg?.llm_backend ?? "local")}
-                onChange={(e) => void setBackend(e.target.value as "anthropic" | "local")}
-              >
-                <option value="local">local</option>
-                <option value="anthropic">anthropic</option>
-              </select>
-            </label>
             <p className="font-mono text-xs text-muted-foreground">
-              Model {cfg?.llm_model ?? "—"}
+              LLM Mistral Large via OpenAI-compatible API
             </p>
             <Button
               size="sm"

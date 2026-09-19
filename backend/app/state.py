@@ -45,8 +45,6 @@ class AppState:
     store: ArtifactStore = field(default_factory=ArtifactStore)
     dataset_id: str = field(default_factory=default_dataset)
     no_egress: bool = False
-    llm_backend: str = "unknown"
-    llm_model: str = "unknown"
     calibration_id: str | None = None
     schema: DetectedSchema | None = None
     profile: ProfileArtifact | None = None
@@ -78,17 +76,11 @@ class AppState:
             calibration_id=self.calibration_id,
             baseline_established=self.model is not None,
             no_egress=self.no_egress,
-            llm_backend=self.llm_backend,
-            llm_model=self.llm_model,
         )
 
     def update_config(self, body: ConfigUpdate) -> RuntimeConfig:
         if body.no_egress is not None:
             self.no_egress = body.no_egress
-        if body.llm_backend is not None:
-            self.llm_backend = body.llm_backend
-        if body.llm_model is not None:
-            self.llm_model = body.llm_model
         if body.dataset_id and body.dataset_id != self.dataset_id:
             if body.dataset_id not in DATASETS:
                 raise ValueError(f"unknown dataset {body.dataset_id}")
