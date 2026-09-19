@@ -6,17 +6,18 @@ import { useEffect, useState } from "react";
 import {
   Activity,
   ChevronsLeft,
+  Gauge,
   MessageSquare,
   PanelLeft,
   Settings,
-  Stethoscope,
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { RuntimeConfig } from "@/lib/browser-api";
 
 const NAV = [
-  { href: "/", label: "System Monitor", icon: Stethoscope },
+  { href: "/", label: "System Monitor", icon: Gauge },
   { href: "/agent", label: "Agent", icon: MessageSquare },
   { href: "/sensors", label: "Sensors", icon: Activity },
 ];
@@ -86,6 +87,15 @@ export function AppSidebar() {
 
   const folded = mounted && collapsed;
 
+  useEffect(() => {
+    if (!settingsOpen) return;
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") setSettingsOpen(false);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [settingsOpen]);
+
   return (
     <>
       <aside
@@ -154,44 +164,59 @@ export function AppSidebar() {
 
       {settingsOpen && (
         <div
-          className="gpu-layer sticky top-0 h-svh w-80 shrink-0 self-start overflow-y-auto border-r border-border bg-card p-4"
-          style={{ transform: "translate3d(0,0,0)", willChange: "transform" }}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setSettingsOpen(false)}
         >
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-sm font-medium">Settings</h2>
-            <Button size="icon-sm" variant="ghost" onClick={() => setSettingsOpen(false)}>
-              <ChevronsLeft />
-            </Button>
-          </div>
-          <div className="space-y-4 text-sm">
-            <label className="block space-y-1">
-              <span className="text-xs text-muted-foreground">Dataset</span>
-              <select
-                className="h-8 w-full rounded-md border border-input bg-background px-2 font-mono text-xs"
-                value={cfg?.dataset_id ?? "industrial_stream"}
-                onChange={(e) => void setDataset(e.target.value)}
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="settings-title"
+            className="w-full max-w-md rounded-xl border border-border bg-card p-4 shadow-lg"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-4 flex items-center justify-between">
+              <h2 id="settings-title" className="text-sm font-medium">
+                Settings
+              </h2>
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                onClick={() => setSettingsOpen(false)}
+                aria-label="Close settings"
               >
-                {(cfg?.datasets ?? ["industrial_stream", "expenses"]).map((id) => (
-                  <option key={id} value={id}>
-                    {id}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <p className="font-mono text-xs text-muted-foreground">
-              Calibration {cfg?.baseline_established ? "frozen" : "none"}
-            </p>
-            <p className="font-mono text-xs text-muted-foreground">
-              LLM Mistral Large via OpenAI-compatible API
-            </p>
-            <Button
-              size="sm"
-              className="w-full"
-              variant={cfg?.no_egress ? "default" : "outline"}
-              onClick={() => void toggleEgress()}
-            >
-              No-egress {cfg?.no_egress ? "on" : "off"}
-            </Button>
+                <X />
+              </Button>
+            </div>
+            <div className="space-y-4 text-sm">
+              <label className="block space-y-1">
+                <span className="text-xs text-muted-foreground">Dataset</span>
+                <select
+                  className="h-8 w-full rounded-md border border-input bg-background px-2 font-mono text-xs"
+                  value={cfg?.dataset_id ?? "industrial_stream"}
+                  onChange={(e) => void setDataset(e.target.value)}
+                >
+                  {(cfg?.datasets ?? ["industrial_stream", "expenses"]).map((id) => (
+                    <option key={id} value={id}>
+                      {id}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <p className="font-mono text-xs text-muted-foreground">
+                Calibration {cfg?.baseline_established ? "frozen" : "none"}
+              </p>
+              <p className="font-mono text-xs text-muted-foreground">
+                LLM Mistral Large via OpenAI-compatible API
+              </p>
+              <Button
+                size="sm"
+                className="w-full"
+                variant={cfg?.no_egress ? "default" : "outline"}
+                onClick={() => void toggleEgress()}
+              >
+                No-egress {cfg?.no_egress ? "on" : "off"}
+              </Button>
+            </div>
           </div>
         </div>
       )}
