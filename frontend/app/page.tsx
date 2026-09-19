@@ -4,7 +4,7 @@ import { DiagnosisView } from "@/components/diagnosis-view";
 export default function Page() {
   return (
     <AppShell>
-      <div className="h-full min-h-0">
+      <div className="h-full min-h-0 overflow-hidden">
         <DiagnosisView />
       </div>
     </AppShell>

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createRuleAgent } from "@/lib/agents";
+import { createRuleAgent } from "@/agents/operator";
 import { ruleSchema } from "@/types/artifacts";
 
 export async function POST(request: Request) {

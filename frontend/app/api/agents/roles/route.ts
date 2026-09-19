@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createRoleInferenceAgent } from "@/lib/agents";
+import { createRoleInferenceAgent } from "@/agents/operator";
 
 export async function POST() {
   try {

@@ -1,6 +1,6 @@
 import { createAgentUIStreamResponse } from "ai";
 import { NextResponse } from "next/server";
-import { createChatAgent } from "@/lib/agents";
+import { createChatAgent } from "@/agents/operator";
 
 export const maxDuration = 60;
 
