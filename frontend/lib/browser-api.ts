@@ -1,5 +1,9 @@
 const BASE = process.env.NEXT_PUBLIC_PIPELINE_URL ?? "http://localhost:8000";
 
+export function monitorStreamUrl(): string {
+  return `${BASE}/monitor/stream`;
+}
+
 export async function browserGet<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`, { cache: "no-store" });
   if (!res.ok) throw new Error(`${path} ${res.status}`);

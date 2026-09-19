@@ -8,7 +8,7 @@ import { StatusChip } from "@/components/status-chip";
 import { StreamChart } from "@/components/stream-chart";
 import {
   browserPost,
-  browserGet,
+  monitorStreamUrl,
   type FieldCard,
   type MonitorSnapshot,
 } from "@/lib/browser-api";
@@ -29,34 +29,53 @@ export function DataSourcesView() {
 
   useEffect(() => {
     let on = true;
-    async function poll() {
-      if (typeof document !== "undefined" && document.hidden) return;
-      try {
-        const data = await browserGet<MonitorSnapshot>("/monitor/snapshot");
-        if (!on) return;
-        const demoTick = data.demo_tick ?? 0;
-        if (
-          data.tick === ticksRef.current.tick &&
-          demoTick === ticksRef.current.demo &&
-          data.dataset_id === ticksRef.current.dataset
-        ) {
-          return;
-        }
-        ticksRef.current = {
-          tick: data.tick,
-          demo: demoTick,
-          dataset: data.dataset_id,
-        };
-        setSnap(data);
-      } catch {
-        if (on) setSnap(null);
+    let source: EventSource | null = null;
+
+    function apply(data: MonitorSnapshot) {
+      if (!on) return;
+      const demoTick = data.demo_tick ?? 0;
+      if (
+        data.tick === ticksRef.current.tick &&
+        demoTick === ticksRef.current.demo &&
+        data.dataset_id === ticksRef.current.dataset
+      ) {
+        return;
       }
+      ticksRef.current = {
+        tick: data.tick,
+        demo: demoTick,
+        dataset: data.dataset_id,
+      };
+      setSnap(data);
     }
-    void poll();
-    const id = setInterval(() => void poll(), 1000);
+
+    function connect() {
+      source?.close();
+      source = new EventSource(monitorStreamUrl());
+      source.addEventListener("snapshot", (event) => {
+        try {
+          apply(JSON.parse((event as MessageEvent<string>).data) as MonitorSnapshot);
+        } catch {
+          /* ignore malformed frames */
+        }
+      });
+    }
+
+    function onVis() {
+      if (document.hidden) {
+        source?.close();
+        source = null;
+        return;
+      }
+      connect();
+    }
+
+    connect();
+    document.addEventListener("visibilitychange", onVis);
     return () => {
       on = false;
-      clearInterval(id);
+      document.removeEventListener("visibilitychange", onVis);
+      source?.close();
     };
   }, []);
 

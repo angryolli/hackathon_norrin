@@ -60,10 +60,9 @@ export function AppSidebar() {
   }
 
   useEffect(() => {
+    if (!settingsOpen) return;
     void refresh();
-    const id = setInterval(() => void refresh(), 2500);
-    return () => clearInterval(id);
-  }, []);
+  }, [settingsOpen]);
 
   function toggleCollapsed() {
     setCollapsed((v) => {

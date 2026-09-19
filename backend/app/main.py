@@ -5,7 +5,9 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from starlette.middleware.gzip import GZipMiddleware
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.config import TICK_SECONDS
 from app.models.schemas import (
@@ -53,14 +55,46 @@ async def lifespan(_app: FastAPI):
             pass
 
 
+_subscribers: set[asyncio.Queue[MonitorSnapshot]] = set()
+
+
 async def _stream() -> None:
     while True:
         STATE.tick_live()
+        snap = STATE.monitor()
+        for queue in list(_subscribers):
+            if queue.full():
+                try:
+                    queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    pass
+            try:
+                queue.put_nowait(snap)
+            except asyncio.QueueFull:
+                pass
         await asyncio.sleep(TICK_SECONDS)
 
 
+def _sse_snapshot(snap: MonitorSnapshot) -> str:
+    return f"event: snapshot\ndata: {snap.model_dump_json()}\n\n"
+
+
+class _SkipStreamGZip:
+    """Gzip JSON, but never event streams (gzip buffers and breaks SSE)."""
+
+    def __init__(self, app: ASGIApp, minimum_size: int = 500) -> None:
+        self.app = app
+        self.gzip = GZipMiddleware(app, minimum_size=minimum_size)
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http" and scope.get("path") == "/monitor/stream":
+            await self.app(scope, receive, send)
+            return
+        await self.gzip(scope, receive, send)
+
+
 app = FastAPI(title="Trustworthy process monitor — compute plane", lifespan=lifespan)
-app.add_middleware(GZipMiddleware, minimum_size=500)
+app.add_middleware(_SkipStreamGZip, minimum_size=500)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000"],
@@ -240,6 +274,30 @@ def events() -> dict:
 @app.get("/monitor/snapshot", response_model=MonitorSnapshot)
 def monitor() -> MonitorSnapshot:
     return STATE.monitor()
+
+
+@app.get("/monitor/stream")
+async def monitor_stream() -> StreamingResponse:
+    async def events():
+        queue: asyncio.Queue[MonitorSnapshot] = asyncio.Queue(maxsize=1)
+        _subscribers.add(queue)
+        try:
+            yield _sse_snapshot(STATE.monitor())
+            while True:
+                snap = await queue.get()
+                yield _sse_snapshot(snap)
+        finally:
+            _subscribers.discard(queue)
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.post("/decision-log/append")
