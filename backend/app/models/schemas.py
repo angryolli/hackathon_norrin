@@ -235,7 +235,7 @@ class SensorCard(BaseModel):
     evidence: str = ""
 
 
-class MonitorSnapshot(SizedArtifact):
+class MonitorSnapshot(BaseModel):
     calibration_id: str | None = None
     dataset_id: str
     tick: int

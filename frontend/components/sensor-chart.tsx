@@ -54,7 +54,7 @@ export function SensorChart({
   tick,
   className = "",
   limit,
-  accent = "rgb(52, 211, 153)",
+  accent = "rgb(82, 82, 91)",
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -64,11 +64,11 @@ export function SensorChart({
   const playheadRef = useRef(0);
   const inkRef = useRef(1);
   const lastFrameRef = useRef(0);
-  const windowRef = useRef(24);
+  const historyRef = useRef(100);
   const rafRef = useRef(0);
 
   useEffect(() => {
-    windowRef.current = Math.max(values.length, 8);
+    historyRef.current = 100;
     const samples = samplesRef.current;
     if (!values.length) {
       samples.length = 0;
@@ -113,7 +113,7 @@ export function SensorChart({
     }
     inkRef.current = 0;
     lastTickRef.current = tick ?? (prevTick ?? 0) + addedCount;
-    const keep = windowRef.current + 8;
+    const keep = historyRef.current + 16;
     if (samples.length > keep) samples.splice(0, samples.length - keep);
   }, [values, tick]);
 
@@ -148,8 +148,10 @@ export function SensorChart({
 
       const samples = samplesRef.current;
       const latest = samples.length ? samples[samples.length - 1].i : 0;
-      const headroom = 1.35;
-      const minPlay = latest + 0.35;
+      const history = historyRef.current;
+      const headroom = 10;
+      const windowSize = history + headroom;
+      const minPlay = latest + 6;
       const maxPlay = latest + headroom;
       playheadRef.current += dt * 2.2;
       if (playheadRef.current < minPlay) {
@@ -158,13 +160,12 @@ export function SensorChart({
       playheadRef.current = Math.min(playheadRef.current, maxPlay);
       inkRef.current = Math.min(1, inkRef.current + dt * 3.2);
 
-      const padL = 36;
-      const padR = 8;
-      const padT = 8;
+      const padL = 40;
+      const padR = 12;
+      const padT = 10;
       const padB = 18;
       const plotW = Math.max(1, cssW - padL - padR);
       const plotH = Math.max(1, cssH - padT - padB);
-      const windowSize = windowRef.current;
       const rightIndex = Math.max(playheadRef.current, windowSize);
       const leftIndex = rightIndex - windowSize;
 
@@ -197,6 +198,9 @@ export function SensorChart({
         min -= 1;
         max += 1;
       }
+      const padY = (max - min) * 0.45;
+      min -= padY;
+      max += padY;
       const span = max - min;
       const xOf = (i: number) => padL + ((i - leftIndex) / windowSize) * plotW;
       const yOf = (v: number) => padT + (1 - (v - min) / span) * plotH;
@@ -223,7 +227,7 @@ export function SensorChart({
       if (limit !== undefined) {
         const y = yOf(limit);
         ctx.setLineDash([4, 4]);
-        ctx.strokeStyle = "rgba(251, 191, 36, 0.75)";
+        ctx.strokeStyle = "rgba(161,161,170,0.7)";
         ctx.beginPath();
         ctx.moveTo(padL, y);
         ctx.lineTo(cssW - padR, y);
@@ -235,31 +239,11 @@ export function SensorChart({
       if (pts.length) {
         ctx.beginPath();
         tracePath(ctx, pts);
-        const fill = ctx.createLinearGradient(0, padT, 0, padT + plotH);
-        fill.addColorStop(0, accent.replace("rgb", "rgba").replace(")", ",0.28)"));
-        fill.addColorStop(1, accent.replace("rgb", "rgba").replace(")", ",0.02)"));
-        ctx.lineTo(pts[pts.length - 1].x, padT + plotH);
-        ctx.lineTo(pts[0].x, padT + plotH);
-        ctx.closePath();
-        ctx.fillStyle = fill;
-        ctx.fill();
-
-        ctx.beginPath();
-        tracePath(ctx, pts);
         ctx.strokeStyle = accent;
-        ctx.lineWidth = 1.75;
+        ctx.lineWidth = 1.25;
         ctx.lineJoin = "round";
         ctx.lineCap = "round";
-        ctx.shadowColor = accent;
-        ctx.shadowBlur = 8;
         ctx.stroke();
-        ctx.shadowBlur = 0;
-
-        const last = pts[pts.length - 1];
-        ctx.beginPath();
-        ctx.arc(last.x, last.y, 2.6, 0, Math.PI * 2);
-        ctx.fillStyle = accent;
-        ctx.fill();
       }
       ctx.restore();
 

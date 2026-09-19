@@ -275,40 +275,17 @@ class AppState:
                 c.sensor_id,
             )
         )
-        try:
-            return MonitorSnapshot(
-                calibration_id=cal,
-                dataset_id=self.dataset_id,
-                tick=self.source.tick,
-                t2_series=self.t2_history[-60:],
-                control_limit=self.model.t2_limit if self.model else 0.0,
-                live_boundary=0,
-                sensors=cards[:40],
-                exclusion_list=list(excl)[:20],
-                latest_event_id=self.drift.latest_event_id if self.drift else None,
-            )
-        except ValueError:
-            slim = [
-                SensorCard(
-                    sensor_id=c.sensor_id,
-                    sparkline=c.sparkline[-12:],
-                    status=c.status,
-                    contribution=c.contribution,
-                    evidence=c.evidence[:80],
-                )
-                for c in cards[:12]
-            ]
-            return MonitorSnapshot(
-                calibration_id=cal,
-                dataset_id=self.dataset_id,
-                tick=self.source.tick,
-                t2_series=self.t2_history[-30:],
-                control_limit=self.model.t2_limit if self.model else 0.0,
-                live_boundary=0,
-                sensors=slim,
-                exclusion_list=list(excl)[:10],
-                latest_event_id=self.drift.latest_event_id if self.drift else None,
-            )
+        return MonitorSnapshot(
+            calibration_id=cal,
+            dataset_id=self.dataset_id,
+            tick=self.source.tick,
+            t2_series=self.t2_history[-60:],
+            control_limit=self.model.t2_limit if self.model else 0.0,
+            live_boundary=0,
+            sensors=cards[:40],
+            exclusion_list=list(excl)[:20],
+            latest_event_id=self.drift.latest_event_id if self.drift else None,
+        )
 
     def add_rule(self, rule: RuleSchema) -> CompileRuleResponse:
         cols = self.schema.numeric_cols if self.schema else []
