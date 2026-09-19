@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.gzip import GZipMiddleware
 
 from app.config import TICK_SECONDS
 from app.models.schemas import (
@@ -20,6 +21,7 @@ from app.models.schemas import (
     CorrelationArtifact,
     DataSource,
     DataSourceCreate,
+    DataSourceFileCreate,
     DataSourceUpdate,
     DecisionAppend,
     DecisionLogPage,
@@ -58,6 +60,7 @@ async def _stream() -> None:
 
 
 app = FastAPI(title="Trustworthy process monitor — compute plane", lifespan=lifespan)
+app.add_middleware(GZipMiddleware, minimum_size=500)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000"],
@@ -98,7 +101,39 @@ def data_sources_list() -> list[DataSource]:
 def data_sources_create(body: DataSourceCreate) -> DataSource:
     if not body.name.strip():
         raise HTTPException(400, "name is required")
+    if body.origin == "api":
+        try:
+            return STATE.add_api_source(body.name, body.api_url)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
     return STATE.add_data_source(body)
+
+
+@app.post("/data-sources/api", response_model=DataSource)
+def data_sources_api(body: DataSourceCreate) -> DataSource:
+    try:
+        return STATE.add_api_source(body.name, body.api_url)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.post("/data-sources/file", response_model=DataSource)
+def data_sources_file(body: DataSourceFileCreate) -> DataSource:
+    import base64
+
+    if not body.content_b64:
+        raise HTTPException(400, "empty file")
+    try:
+        raw = base64.b64decode(body.content_b64)
+    except Exception as exc:
+        raise HTTPException(400, "invalid file encoding") from exc
+    if not raw:
+        raise HTTPException(400, "empty file")
+    filename = body.filename or "upload.csv"
+    try:
+        return STATE.add_file_source(body.name, filename, raw)
+    except Exception as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @app.put("/data-sources/{source_id}", response_model=DataSource)

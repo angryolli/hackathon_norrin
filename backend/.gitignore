@@ -9,6 +9,8 @@ wheels/
 # Virtual environments
 .venv
 
+.env
+
 te_process.csv
 artifacts/*.sqlite
 artifacts/*.sqlite-*

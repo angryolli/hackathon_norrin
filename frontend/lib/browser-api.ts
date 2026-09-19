@@ -50,6 +50,8 @@ export type MonitorSnapshot = {
   t2_series: number[];
   control_limit: number;
   fields: FieldCard[];
+  demo_fields?: FieldCard[];
+  demo_tick?: number;
   exclusion_list: string[];
   latest_event_id: string | null;
   evidence: string;
@@ -61,6 +63,9 @@ export type DataSource = {
   kind: "process" | "business" | "other";
   description: string;
   generator: "industrial" | "expenses";
+  origin: "generator" | "api" | "file";
+  api_url: string;
+  file_path: string;
   train_path: string;
   live_path: string;
   created_at: string;

@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { Badge } from "@/components/ui/badge";
 import type { Chip } from "@/lib/browser-api";
 
@@ -17,10 +18,10 @@ const labels: Record<Chip, string> = {
   excluded: "Excluded — data fault",
 };
 
-export function StatusChip({ status }: { status: Chip }) {
+export const StatusChip = memo(function StatusChip({ status }: { status: Chip }) {
   return (
     <Badge variant="outline" className={styles[status]}>
       {labels[status]}
     </Badge>
   );
-}
+});

@@ -20,6 +20,10 @@ def _industrial_columns() -> list[str]:
 class RollingSource:
     dataset_id: str = "industrial_stream"
     generator: str = "industrial"
+    origin: str = "generator"
+    api_url: str = ""
+    api_poll: bool = False
+    playback: list[dict] = field(default_factory=list)
     tick: int = 0
     live: deque[dict] = field(default_factory=lambda: deque(maxlen=LIVE_BUFFER))
     lock: Lock = field(default_factory=Lock)
@@ -30,6 +34,10 @@ class RollingSource:
     def reset(self, dataset_id: str, generator: str | None = None) -> None:
         with self.lock:
             self.dataset_id = dataset_id
+            self.origin = "generator"
+            self.api_url = ""
+            self.api_poll = False
+            self.playback = []
             if generator:
                 self.generator = generator
             elif dataset_id == "expenses":
@@ -41,6 +49,36 @@ class RollingSource:
             self.last_values.clear()
             self.frozen.clear()
             self.rng = np.random.default_rng(7)
+
+    def reset_from_spec(self, spec: dict) -> None:
+        from app.ingestion.files import dataframe_from_api, dataframe_to_rows
+
+        origin = spec.get("origin") or "generator"
+        with self.lock:
+            self.dataset_id = spec["id"]
+            self.origin = origin
+            self.generator = spec.get("generator") or "industrial"
+            self.api_url = spec.get("api_url") or ""
+            self.tick = 0
+            self.live.clear()
+            self.last_values.clear()
+            self.frozen.clear()
+            self.rng = np.random.default_rng(7)
+            self.playback = []
+            self.api_poll = False
+            path = spec.get("file_path") or spec.get("live_path") or spec.get("train_path")
+            if origin in ("file", "api") and path:
+                frame = pd.read_csv(path)
+                rows = dataframe_to_rows(frame)
+                self.playback = rows
+                self.api_poll = origin == "api" and len(rows) <= 1 and bool(self.api_url)
+            if origin == "api" and self.api_poll and self.api_url:
+                try:
+                    fetched = dataframe_to_rows(dataframe_from_api(self.api_url))
+                    if fetched:
+                        self.playback = fetched
+                except Exception:
+                    pass
 
     def _row_industrial(self, t: int, fault: int, *, live: bool) -> dict:
         cols = _industrial_columns()
@@ -141,9 +179,44 @@ class RollingSource:
 
     def emit(self) -> None:
         with self.lock:
+            if self.origin in ("file", "api") and (self.playback or self.api_poll):
+                row = self._playback_row()
+                if row is not None:
+                    self.live.append(row)
+                    self.tick += 1
+                return
             row = self.make_row(self.tick, live=True)
             self.live.append(row)
             self.tick += 1
+
+    def _playback_row(self) -> dict | None:
+        from app.ingestion.files import dataframe_from_api, dataframe_to_rows
+
+        if self.api_poll and self.api_url:
+            try:
+                fetched = dataframe_to_rows(dataframe_from_api(self.api_url, timeout=2.0))
+                if fetched:
+                    self.playback = fetched
+            except Exception:
+                pass
+        if not self.playback:
+            return None
+        return dict(self.playback[self.tick % len(self.playback)])
+
+    def sparkline_map(self, cols: list[str], n: int) -> dict[str, list[float]]:
+        with self.lock:
+            rows = list(self.live)[-n:]
+        out: dict[str, list[float]] = {c: [] for c in cols}
+        for row in rows:
+            for col in cols:
+                value = row.get(col)
+                if value is None:
+                    continue
+                try:
+                    out[col].append(round(float(value), 3))
+                except (TypeError, ValueError):
+                    continue
+        return out
 
     def live_frame(self) -> pd.DataFrame:
         with self.lock:

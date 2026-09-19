@@ -52,6 +52,9 @@ class DataSourceRecord(SQLModel, table=True):
     kind: str = "process"
     description: str = ""
     generator: str = "industrial"
+    origin: str = "generator"
+    api_url: str = ""
+    file_path: str = ""
     train_path: str = ""
     live_path: str = ""
     created_at: str

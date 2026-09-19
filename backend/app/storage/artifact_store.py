@@ -37,9 +37,24 @@ class ArtifactStore:
             conn.execute(text("PRAGMA foreign_keys=ON"))
             conn.commit()
         SQLModel.metadata.create_all(self._engine)
+        self._migrate_data_sources()
 
     def _session(self) -> Session:
         return Session(self._engine)
+
+    def _migrate_data_sources(self) -> None:
+        with self._engine.connect() as conn:
+            rows = conn.execute(text("PRAGMA table_info(data_sources)")).fetchall()
+            names = {row[1] for row in rows}
+            additions = {
+                "origin": "TEXT DEFAULT 'generator'",
+                "api_url": "TEXT DEFAULT ''",
+                "file_path": "TEXT DEFAULT ''",
+            }
+            for col_name, ddl in additions.items():
+                if col_name not in names:
+                    conn.execute(text(f"ALTER TABLE data_sources ADD COLUMN {col_name} {ddl}"))
+            conn.commit()
 
     def put(self, kind: str, key: str, payload: BaseModel | dict) -> None:
         if isinstance(payload, BaseModel):
@@ -242,6 +257,9 @@ class ArtifactStore:
             "kind": row.kind,
             "description": row.description,
             "generator": row.generator,
+            "origin": getattr(row, "origin", None) or "generator",
+            "api_url": getattr(row, "api_url", None) or "",
+            "file_path": getattr(row, "file_path", None) or "",
             "train_path": row.train_path,
             "live_path": row.live_path,
             "created_at": row.created_at,
@@ -262,6 +280,9 @@ class ArtifactStore:
                         kind=spec["kind"],
                         description=spec["description"],
                         generator=spec["generator"],
+                        origin=spec.get("origin") or "generator",
+                        api_url=spec.get("api_url") or "",
+                        file_path=spec.get("file_path") or "",
                         train_path=spec["train_path"],
                         live_path=spec["live_path"],
                         created_at=now,
@@ -290,6 +311,9 @@ class ArtifactStore:
                     kind=body.get("kind") or "process",
                     description=body.get("description") or "",
                     generator=body.get("generator") or "industrial",
+                    origin=body.get("origin") or "generator",
+                    api_url=body.get("api_url") or "",
+                    file_path=body.get("file_path") or "",
                     train_path=body["train_path"],
                     live_path=body["live_path"],
                     created_at=now,
@@ -315,6 +339,12 @@ class ArtifactStore:
                 row.description = body["description"]
             if "generator" in body and body["generator"] is not None:
                 row.generator = body["generator"]
+            if "origin" in body and body["origin"] is not None:
+                row.origin = body["origin"]
+            if "api_url" in body and body["api_url"] is not None:
+                row.api_url = body["api_url"]
+            if "file_path" in body and body["file_path"] is not None:
+                row.file_path = body["file_path"]
             row.updated_at = now
             session.add(row)
             session.commit()

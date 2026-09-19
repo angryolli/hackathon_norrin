@@ -6,12 +6,18 @@ from dataclasses import dataclass, field
 
 import pandas as pd
 
-from app.config import DATA_DIR, SPARKLINE_POINTS, default_dataset
+from app.config import DATA_DIR, SPARKLINE_POINTS, default_dataset, demo_data_path
 from app.correlation.correlation_engine import correlate
 from app.diagnosis.contribution_ranking import rank_event
 from app.drift.calibration import DriftModel, fit_drift_model
 from app.drift.detector import score_batch
+from app.ingestion.disk_replay import DiskReplaySource
 from app.ingestion.fake_stream import RollingSource
+from app.ingestion.files import (
+    dataframe_from_api,
+    dataframe_from_bytes,
+    write_csv,
+)
 from app.ingestion.labels import fault_free_segment
 from app.ingestion.loader import DetectedSchema, load_csv, process_frame
 from app.models.schemas import (
@@ -46,6 +52,7 @@ from app.storage.artifact_store import ArtifactStore
 @dataclass
 class AppState:
     source: RollingSource = field(default_factory=RollingSource)
+    demo: DiskReplaySource | None = None
     store: ArtifactStore = field(default_factory=ArtifactStore)
     dataset_id: str = field(default_factory=default_dataset)
     no_egress: bool = False
@@ -64,6 +71,8 @@ class AppState:
     event_seq: int = 1
     confirmed: set[str] = field(default_factory=set)
     overrides: dict[str, dict] = field(default_factory=dict)
+    _monitor_key: tuple | None = None
+    _monitor_snap: MonitorSnapshot | None = None
 
     def boot(self) -> None:
         self.store.seed_data_sources()
@@ -72,16 +81,30 @@ class AppState:
         if self.dataset_id not in ids and sources:
             self.dataset_id = sources[0]["id"]
         for src in sources:
-            self.source.reset(src["id"], src["generator"])
-            self.source.seed_calibration_csv(src["train_path"], src["live_path"])
+            origin = src.get("origin") or "generator"
+            if origin == "generator":
+                self.source.reset(src["id"], src.get("generator"))
+                self.source.seed_calibration_csv(src["train_path"], src["live_path"])
         self._switch_stream(self.dataset_id, seed=False)
         self.calibrate()
+        path = demo_data_path()
+        if path is not None:
+            try:
+                demo = DiskReplaySource(path)
+                demo.open()
+                self.demo = demo
+            except Exception:
+                self.demo = None
 
     def _source_ids(self) -> list[str]:
         return [s["id"] for s in self.store.list_data_sources()]
 
     def _as_data_source(self, row: dict) -> DataSource:
-        return DataSource(**row, active=row["id"] == self.dataset_id)
+        payload = dict(row)
+        payload["origin"] = payload.get("origin") or "generator"
+        if payload.get("generator") not in ("industrial", "expenses"):
+            payload["generator"] = "industrial"
+        return DataSource(**payload, active=row["id"] == self.dataset_id)
 
     def list_data_sources(self) -> list[DataSource]:
         return [self._as_data_source(row) for row in self.store.list_data_sources()]
@@ -106,9 +129,65 @@ class AppState:
         if spec is None:
             raise ValueError(f"unknown data source {source_id}")
         self.dataset_id = source_id
-        self.source.reset(source_id, spec["generator"])
-        if seed:
-            self.source.seed_calibration_csv(spec["train_path"], spec["live_path"])
+        origin = spec.get("origin") or "generator"
+        if origin == "generator":
+            self.source.reset(source_id, spec.get("generator"))
+            if seed:
+                self.source.seed_calibration_csv(spec["train_path"], spec["live_path"])
+            return
+        self.source.reset_from_spec(spec)
+
+    def _persist_table(self, source_id: str, frame: pd.DataFrame) -> str:
+        path = str(DATA_DIR / "sources" / f"{source_id}.csv")
+        write_csv(frame, DATA_DIR / "sources" / f"{source_id}.csv")
+        return path
+
+    def add_file_source(self, name: str, filename: str, data: bytes) -> DataSource:
+        source_id = self._unique_source_id(name or filename)
+        frame = dataframe_from_bytes(filename, data)
+        path = self._persist_table(source_id, frame)
+        row = self.store.create_data_source(
+            {
+                "id": source_id,
+                "name": (name or filename).strip() or source_id,
+                "kind": "other",
+                "description": f"Ingested file {filename}",
+                "generator": "industrial",
+                "origin": "file",
+                "api_url": "",
+                "file_path": path,
+                "train_path": path,
+                "live_path": path,
+            }
+        )
+        self._switch_stream(source_id, seed=False)
+        self._recalibrate_after_switch()
+        return self._as_data_source(row)
+
+    def add_api_source(self, name: str, api_url: str) -> DataSource:
+        url = api_url.strip()
+        if not url:
+            raise ValueError("API URL is required")
+        source_id = self._unique_source_id(name or "api")
+        frame = dataframe_from_api(url)
+        path = self._persist_table(source_id, frame)
+        row = self.store.create_data_source(
+            {
+                "id": source_id,
+                "name": (name or source_id).strip(),
+                "kind": "other",
+                "description": f"API {url}",
+                "generator": "industrial",
+                "origin": "api",
+                "api_url": url,
+                "file_path": path,
+                "train_path": path,
+                "live_path": path,
+            }
+        )
+        self._switch_stream(source_id, seed=False)
+        self._recalibrate_after_switch()
+        return self._as_data_source(row)
 
     def _recalibrate_after_switch(self) -> None:
         self.events.clear()
@@ -313,6 +392,8 @@ class AppState:
 
     def tick_live(self) -> None:
         self.source.emit()
+        if self.demo is not None:
+            self.demo.emit()
         if self.model is None:
             return
         if self.source.tick % 2 != 0:
@@ -324,32 +405,43 @@ class AppState:
             return
 
     def monitor(self) -> MonitorSnapshot:
+        demo_tick = self.demo.tick if self.demo is not None else 0
+        latest = self.drift.latest_event_id if self.drift else None
+        quality_id = id(self.quality)
+        key = (self.dataset_id, self.calibration_id, self.source.tick, demo_tick, latest, quality_id)
+        if self._monitor_snap is not None and self._monitor_key == key:
+            return self._monitor_snap
+        snap = self._build_monitor(demo_tick)
+        self._monitor_key = key
+        self._monitor_snap = snap
+        return snap
+
+    def _build_monitor(self, demo_tick: int) -> MonitorSnapshot:
         cal = self.calibration_id
-        live = self.source.live_frame()
         excl = set(self.quality.exclusion_list if self.quality else [])
         contrib_map: dict[str, float] = {}
         if self.drift and self.drift.events:
             for c in self.drift.events[-1].contributions:
-                contrib_map[c.field_id] = c.contribution_score
+                contrib_map[c.field_id] = round(c.contribution_score, 3)
         peak = max(contrib_map.values()) if contrib_map else 0.0
         cal_frozen = {
             p.field_id: p.frozen_rate for p in (self.profile.fields if self.profile else [])
         }
-        cards: list[FieldCard] = []
         cols = self.schema.numeric_cols if self.schema else []
+        sparks = self.source.sparkline_map(cols, SPARKLINE_POINTS)
+        cards: list[FieldCard] = []
         for col in cols:
-            spark: list[float] = []
+            spark = sparks.get(col, [])
             status: Chip = "normal"
             evidence = "within frozen baseline"
-            if not live.empty and col in live:
-                s = pd.to_numeric(live[col], errors="coerce").dropna()
-                spark = [float(v) for v in s.tail(SPARKLINE_POINTS).tolist()]
-                if len(spark) > 5:
-                    deltas = [abs(spark[i] - spark[i - 1]) for i in range(1, len(spark))]
-                    frozen_frac = sum(d < 1e-9 for d in deltas) / len(deltas)
-                    if frozen_frac > 0.85 and cal_frozen.get(col, 0) < 0.4:
-                        status = "stuck"
-                        evidence = "near-zero rolling delta in live window"
+            if len(spark) > 5:
+                frozen = 0
+                for i in range(1, len(spark)):
+                    if abs(spark[i] - spark[i - 1]) < 1e-9:
+                        frozen += 1
+                if frozen / (len(spark) - 1) > 0.85 and cal_frozen.get(col, 0) < 0.4:
+                    status = "stuck"
+                    evidence = "near-zero rolling delta in live window"
             if col in excl:
                 status = "excluded"
                 evidence = "excluded — data-source field fault from quality-check"
@@ -371,14 +463,28 @@ class AppState:
                 c.field_id,
             )
         )
+        demo_cards: list[FieldCard] = []
+        if self.demo is not None:
+            for col, spark in self.demo.cards():
+                demo_cards.append(
+                    FieldCard(
+                        field_id=col,
+                        sparkline=spark,
+                        status="normal",
+                        contribution=0.0,
+                        evidence="demo replay",
+                    )
+                )
         return MonitorSnapshot(
             calibration_id=cal,
             dataset_id=self.dataset_id,
             tick=self.source.tick,
-            t2_series=self.t2_history[-60:],
-            control_limit=self.model.t2_limit if self.model else 0.0,
+            t2_series=[round(v, 4) for v in self.t2_history[-60:]],
+            control_limit=round(self.model.t2_limit, 4) if self.model else 0.0,
             live_boundary=0,
             fields=cards[:40],
+            demo_fields=demo_cards[:80],
+            demo_tick=demo_tick,
             exclusion_list=list(excl)[:20],
             latest_event_id=self.drift.latest_event_id if self.drift else None,
         )

@@ -4,8 +4,31 @@ import os
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = ROOT.parent
 DATA_DIR = ROOT / "data"
 ARTIFACT_DIR = ROOT / "artifacts"
+
+
+def _load_dotenv() -> None:
+    for path in (
+        ROOT / ".env",
+        REPO_ROOT / ".env",
+        REPO_ROOT / "frontend" / ".env",
+    ):
+        if not path.is_file():
+            continue
+        for line in path.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#") or "=" not in stripped:
+                continue
+            key, _, value = stripped.partition("=")
+            key = key.strip()
+            value = value.strip().strip("'").strip('"')
+            if key and key not in os.environ:
+                os.environ[key] = value
+
+
+_load_dotenv()
 
 DEFAULT_DATA_SOURCES = [
     {
@@ -14,6 +37,9 @@ DEFAULT_DATA_SOURCES = [
         "kind": "process",
         "description": "Unlabeled process variables from a continuous plant stream.",
         "generator": "industrial",
+        "origin": "generator",
+        "api_url": "",
+        "file_path": "",
         "train_path": str(DATA_DIR / "train.csv"),
         "live_path": str(DATA_DIR / "test.csv"),
     },
@@ -23,6 +49,9 @@ DEFAULT_DATA_SOURCES = [
         "kind": "business",
         "description": "Business expense records for a second domain.",
         "generator": "expenses",
+        "origin": "generator",
+        "api_url": "",
+        "file_path": "",
         "train_path": str(DATA_DIR / "second_domain.csv"),
         "live_path": str(DATA_DIR / "second_domain_live.csv"),
     },
@@ -40,3 +69,16 @@ PCA_MAX_COMPONENTS = 5
 
 def default_dataset() -> str:
     return os.getenv("DATASET_ID", "industrial_stream")
+
+
+def demo_data_path() -> Path | None:
+    raw = os.getenv("DEMO_DATA_URI", "").strip().strip("'").strip('"')
+    if not raw:
+        return None
+    path = Path(raw).expanduser()
+    if path.is_dir():
+        csvs = sorted(p for p in path.iterdir() if p.suffix.lower() == ".csv")
+        return csvs[0] if csvs else None
+    if path.is_file():
+        return path
+    return None

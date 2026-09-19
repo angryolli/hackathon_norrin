@@ -1,410 +1,297 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Plus } from "lucide-react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { StatusChip } from "@/components/status-chip";
 import { StreamChart } from "@/components/stream-chart";
 import {
-  browserDelete,
-  browserGet,
   browserPost,
-  browserPut,
-  type DataSource,
+  browserGet,
+  type FieldCard,
   type MonitorSnapshot,
 } from "@/lib/browser-api";
 import { cn } from "@/lib/utils";
 
-const KINDS = ["process", "business", "other"] as const;
-const GENERATORS = ["industrial", "expenses"] as const;
-
-const KIND_LABEL: Record<(typeof KINDS)[number], string> = {
-  process: "Process",
-  business: "Business",
-  other: "Other",
-};
-
-const GENERATOR_LABEL: Record<(typeof GENERATORS)[number], string> = {
-  industrial: "Industrial stream",
-  expenses: "Expense records",
-};
-
-type Draft = {
-  name: string;
-  kind: DataSource["kind"];
-  description: string;
-  generator: DataSource["generator"];
-};
-
-const emptyDraft = (): Draft => ({
-  name: "",
-  kind: "process",
-  description: "",
-  generator: "industrial",
-});
-
-function toDraft(source: DataSource): Draft {
-  return {
-    name: source.name,
-    kind: source.kind,
-    description: source.description,
-    generator: source.generator,
-  };
-}
+type OriginChoice = "api" | "file" | null;
 
 export function DataSourcesView() {
-  const [sources, setSources] = useState<DataSource[]>([]);
-  const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [adding, setAdding] = useState(false);
-  const [createDraft, setCreateDraft] = useState<Draft>(emptyDraft());
-  const [busy, setBusy] = useState<string | null>(null);
+  const [choice, setChoice] = useState<OriginChoice>(null);
+  const [name, setName] = useState("");
+  const [apiUrl, setApiUrl] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [snap, setSnap] = useState<MonitorSnapshot | null>(null);
-
-  async function refresh() {
-    const rows = await browserGet<DataSource[]>("/data-sources");
-    setSources(rows);
-    setDrafts(Object.fromEntries(rows.map((row) => [row.id, toDraft(row)])));
-  }
-
-  useEffect(() => {
-    void refresh().catch(() => setSources([]));
-  }, []);
+  const ticksRef = useRef({ tick: -1, demo: -1, dataset: "" });
 
   useEffect(() => {
     let on = true;
     async function poll() {
+      if (typeof document !== "undefined" && document.hidden) return;
       try {
         const data = await browserGet<MonitorSnapshot>("/monitor/snapshot");
-        if (on) setSnap(data);
+        if (!on) return;
+        const demoTick = data.demo_tick ?? 0;
+        if (
+          data.tick === ticksRef.current.tick &&
+          demoTick === ticksRef.current.demo &&
+          data.dataset_id === ticksRef.current.dataset
+        ) {
+          return;
+        }
+        ticksRef.current = {
+          tick: data.tick,
+          demo: demoTick,
+          dataset: data.dataset_id,
+        };
+        setSnap(data);
       } catch {
         if (on) setSnap(null);
       }
     }
     void poll();
-    const id = setInterval(() => void poll(), 900);
+    const id = setInterval(() => void poll(), 1000);
     return () => {
       on = false;
       clearInterval(id);
     };
   }, []);
 
-  async function save(id: string) {
-    const draft = drafts[id];
-    if (!draft) return;
-    setBusy(id);
+  useEffect(() => {
+    if (!adding) return;
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") closeModal();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [adding]);
+
+  function closeModal() {
+    setAdding(false);
+    setChoice(null);
+    setName("");
+    setApiUrl("");
+    setFile(null);
+    setError(null);
+  }
+
+  async function submit() {
+    setBusy(true);
     setError(null);
     try {
-      await browserPut(`/data-sources/${id}`, draft);
-      await refresh();
+      if (choice === "api") {
+        if (!apiUrl.trim()) {
+          setError("API URL is required");
+          return;
+        }
+        await browserPost("/data-sources/api", {
+          name: name.trim() || "API source",
+          origin: "api",
+          api_url: apiUrl.trim(),
+        });
+      } else if (choice === "file") {
+        if (!file) {
+          setError("Choose a CSV or Excel file");
+          return;
+        }
+        const content_b64 = await fileToBase64(file);
+        await browserPost("/data-sources/file", {
+          name: name.trim() || file.name.replace(/\.[^.]+$/, ""),
+          filename: file.name,
+          content_b64,
+        });
+      } else {
+        return;
+      }
+      closeModal();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "save failed");
+      setError(err instanceof Error ? err.message : "add failed");
     } finally {
-      setBusy(null);
+      setBusy(false);
     }
   }
 
-  async function activate(id: string) {
-    setBusy(id);
-    setError(null);
-    try {
-      await browserPost("/config", { dataset_id: id });
-      await refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "activate failed");
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function remove(id: string) {
-    setBusy(id);
-    setError(null);
-    try {
-      await browserDelete(`/data-sources/${id}`);
-      await refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "delete failed");
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function create() {
-    if (!createDraft.name.trim()) {
-      setError("Name is required");
-      return;
-    }
-    setBusy("create");
-    setError(null);
-    try {
-      await browserPost("/data-sources", createDraft);
-      setAdding(false);
-      setCreateDraft(emptyDraft());
-      await refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "create failed");
-    } finally {
-      setBusy(null);
-    }
-  }
+  const streams = useMemo(() => {
+    const fakeStreams = [...(snap?.fields ?? [])].sort((a, b) => {
+      const an = Number.parseInt(a.field_id.replace(/\D/g, ""), 10);
+      const bn = Number.parseInt(b.field_id.replace(/\D/g, ""), 10);
+      const av = Number.isFinite(an) ? an : Number.POSITIVE_INFINITY;
+      const bv = Number.isFinite(bn) ? bn : Number.POSITIVE_INFINITY;
+      return av !== bv ? av - bv : a.field_id.localeCompare(b.field_id);
+    });
+    const demoStreams = snap?.demo_fields ?? [];
+    const demoIds = new Set(demoStreams.map((d) => d.field_id));
+    return { items: [...fakeStreams, ...demoStreams], demoIds };
+  }, [snap]);
 
   return (
     <div className="h-full min-h-0 overflow-y-auto p-4">
-      <div className="mb-4 space-y-1">
-        <h1 className="text-sm font-medium">Data sources</h1>
-        <p className="text-sm text-muted-foreground">
-          Choose what data enters the system and how each source is described.
-          Process streams and business records use the same pipeline.
-        </p>
-        {error && <p className="text-sm text-destructive">{error}</p>}
-      </div>
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-        {sources.map((source) => {
-          const draft = drafts[source.id] ?? toDraft(source);
-          return (
-            <article
-              key={source.id}
-              className={cn(
-                "flex min-h-72 flex-col gap-3 rounded-xl border bg-card p-4",
-                source.active ? "border-foreground/40" : "border-border",
-              )}
-            >
-              <div className="flex items-start justify-between gap-2">
-                <Input
-                  value={draft.name}
-                  onChange={(e) =>
-                    setDrafts((m) => ({
-                      ...m,
-                      [source.id]: { ...draft, name: e.target.value },
-                    }))
-                  }
-                  aria-label="Data source name"
-                />
-                {source.active && (
-                  <span className="mt-1 shrink-0 font-mono text-[11px] tracking-wide text-muted-foreground uppercase">
-                    Active
-                  </span>
-                )}
-              </div>
-              <p className="font-mono text-[11px] text-muted-foreground">{source.id}</p>
-              <label className="space-y-1 text-xs text-muted-foreground">
-                <span>Kind</span>
-                <select
-                  className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground"
-                  value={draft.kind}
-                  onChange={(e) =>
-                    setDrafts((m) => ({
-                      ...m,
-                      [source.id]: {
-                        ...draft,
-                        kind: e.target.value as Draft["kind"],
-                      },
-                    }))
-                  }
-                >
-                  {KINDS.map((kind) => (
-                    <option key={kind} value={kind}>
-                      {KIND_LABEL[kind]}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="space-y-1 text-xs text-muted-foreground">
-                <span>Stream family</span>
-                <select
-                  className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground"
-                  value={draft.generator}
-                  onChange={(e) =>
-                    setDrafts((m) => ({
-                      ...m,
-                      [source.id]: {
-                        ...draft,
-                        generator: e.target.value as Draft["generator"],
-                      },
-                    }))
-                  }
-                >
-                  {GENERATORS.map((gen) => (
-                    <option key={gen} value={gen}>
-                      {GENERATOR_LABEL[gen]}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <Textarea
-                className="min-h-16 flex-1"
-                value={draft.description}
-                onChange={(e) =>
-                  setDrafts((m) => ({
-                    ...m,
-                    [source.id]: { ...draft, description: e.target.value },
-                  }))
-                }
-                placeholder="What this data source contains"
-              />
-              <div className="mt-auto flex flex-wrap gap-2">
-                <Button
-                  size="sm"
-                  disabled={busy === source.id}
-                  onClick={() => void save(source.id)}
-                >
-                  Save
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={source.active || busy === source.id}
-                  onClick={() => void activate(source.id)}
-                >
-                  Use
-                </Button>
-                <Button
-                  size="sm"
-                  variant="destructive"
-                  disabled={busy === source.id || sources.length < 2}
-                  onClick={() => void remove(source.id)}
-                >
-                  Delete
-                </Button>
-              </div>
-            </article>
-          );
-        })}
-        {adding ? (
-          <article className="flex min-h-72 flex-col gap-3 rounded-xl border border-dashed border-border bg-card p-4">
-            <Input
-              value={createDraft.name}
-              onChange={(e) => setCreateDraft((d) => ({ ...d, name: e.target.value }))}
-              placeholder="Name"
-              aria-label="New data source name"
-            />
-            <label className="space-y-1 text-xs text-muted-foreground">
-              <span>Kind</span>
-              <select
-                className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground"
-                value={createDraft.kind}
-                onChange={(e) =>
-                  setCreateDraft((d) => ({
-                    ...d,
-                    kind: e.target.value as Draft["kind"],
-                    generator:
-                      e.target.value === "business" ? "expenses" : d.generator,
-                  }))
-                }
-              >
-                {KINDS.map((kind) => (
-                  <option key={kind} value={kind}>
-                    {KIND_LABEL[kind]}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="space-y-1 text-xs text-muted-foreground">
-              <span>Stream family</span>
-              <select
-                className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground"
-                value={createDraft.generator}
-                onChange={(e) =>
-                  setCreateDraft((d) => ({
-                    ...d,
-                    generator: e.target.value as Draft["generator"],
-                  }))
-                }
-              >
-                {GENERATORS.map((gen) => (
-                  <option key={gen} value={gen}>
-                    {GENERATOR_LABEL[gen]}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <Textarea
-              className="min-h-16 flex-1"
-              value={createDraft.description}
-              onChange={(e) =>
-                setCreateDraft((d) => ({ ...d, description: e.target.value }))
-              }
-              placeholder="What this data source contains"
-            />
-            <div className="mt-auto flex flex-wrap gap-2">
-              <Button size="sm" disabled={busy === "create"} onClick={() => void create()}>
-                Add
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => {
-                  setAdding(false);
-                  setCreateDraft(emptyDraft());
-                }}
-              >
-                Cancel
-              </Button>
-            </div>
-          </article>
-        ) : (
-          <button
-            type="button"
-            onClick={() => setAdding(true)}
-            className="flex min-h-72 items-center justify-center rounded-xl border border-dashed border-border bg-card text-muted-foreground transition-colors hover:border-foreground/40 hover:text-foreground"
-            aria-label="Add data source"
-          >
-            <Plus className="size-10" strokeWidth={1.5} />
-          </button>
-        )}
+      <div className="grid grid-cols-3 gap-2">
+        <button
+          type="button"
+          onClick={() => setAdding(true)}
+          className={cn(
+            STREAM_CARD,
+            "flex appearance-none flex-col border-dashed text-muted-foreground transition-colors hover:border-foreground/40 hover:text-foreground",
+          )}
+          aria-label="Add data source"
+        >
+          <div className="h-7" />
+          <div className="mt-1 flex h-28 items-center justify-center">
+            <Plus className="size-8" strokeWidth={1.5} />
+          </div>
+        </button>
+        {streams.items.map((stream) => (
+          <StreamTile
+            key={`${snap?.dataset_id ?? "src"}:${stream.field_id}`}
+            stream={stream}
+            tick={
+              streams.demoIds.has(stream.field_id) ? snap?.demo_tick : snap?.tick
+            }
+          />
+        ))}
       </div>
 
-      <SensorGrid snap={snap} />
+      {adding && (
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-4"
+          onClick={closeModal}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="add-source-title"
+            className="w-full max-w-md rounded-xl border border-border bg-card p-4 shadow-lg"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-4 flex items-center justify-between">
+              <h2 id="add-source-title" className="text-sm font-medium">
+                Add data source
+              </h2>
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                onClick={closeModal}
+                aria-label="Close"
+              >
+                <X />
+              </Button>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setChoice("api")}
+                className={cn(
+                  "rounded-xl border px-3 py-6 text-sm transition-colors",
+                  choice === "api"
+                    ? "border-foreground/40 bg-secondary"
+                    : "border-border hover:border-foreground/30",
+                )}
+              >
+                API
+              </button>
+              <button
+                type="button"
+                onClick={() => setChoice("file")}
+                className={cn(
+                  "rounded-xl border px-3 py-6 text-sm transition-colors",
+                  choice === "file"
+                    ? "border-foreground/40 bg-secondary"
+                    : "border-border hover:border-foreground/30",
+                )}
+              >
+                CSV / Excel
+              </button>
+            </div>
+            {choice && (
+              <div className="mt-4 space-y-3">
+                <label className="block space-y-1 text-xs text-muted-foreground">
+                  <span>Name</span>
+                  <Input
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder={choice === "file" ? "From file name if empty" : "API source"}
+                  />
+                </label>
+                {choice === "api" ? (
+                  <label className="block space-y-1 text-xs text-muted-foreground">
+                    <span>API URL</span>
+                    <Input
+                      value={apiUrl}
+                      onChange={(e) => setApiUrl(e.target.value)}
+                      placeholder="https://…"
+                    />
+                  </label>
+                ) : (
+                  <label className="block space-y-1 text-xs text-muted-foreground">
+                    <span>File</span>
+                    <Input
+                      type="file"
+                      accept=".csv,.txt,.xlsx,.xls,.xlsm,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                      onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                    />
+                  </label>
+                )}
+                {error && <p className="text-sm text-destructive">{error}</p>}
+                <Button className="w-full" disabled={busy} onClick={() => void submit()}>
+                  Add
+                </Button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-function SensorGrid({ snap }: { snap: MonitorSnapshot | null }) {
-  const sensors = [...(snap?.fields ?? [])].sort((a, b) => {
-    const an = Number.parseInt(a.field_id.replace(/\D/g, ""), 10);
-    const bn = Number.parseInt(b.field_id.replace(/\D/g, ""), 10);
-    const av = Number.isFinite(an) ? an : Number.POSITIVE_INFINITY;
-    const bv = Number.isFinite(bn) ? bn : Number.POSITIVE_INFINITY;
-    return av !== bv ? av - bv : a.field_id.localeCompare(b.field_id);
-  });
+const STREAM_CARD = "box-border h-40 min-w-0 rounded-xl border bg-card p-2";
 
+const StreamTile = memo(function StreamTile({
+  stream,
+  tick,
+}: {
+  stream: FieldCard;
+  tick?: number;
+}) {
   return (
-    <section className="mt-8 space-y-3">
-      <div className="space-y-1">
-        <h2 className="text-sm font-medium">Sensors</h2>
-        <p className="text-sm text-muted-foreground">
-          Each numeric column in the active data source is a sensor from the first sample.
-        </p>
+    <div
+      className={STREAM_CARD}
+      style={{ contentVisibility: "auto", containIntrinsicSize: "auto 10rem" }}
+    >
+      <div className="flex h-7 items-center justify-between gap-2">
+        <span className="font-mono text-sm">{stream.field_id}</span>
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="truncate font-mono text-[11px] text-muted-foreground">
+            contrib {stream.contribution.toFixed(2)}
+          </span>
+          <StatusChip status={stream.status} />
+        </div>
       </div>
-      <div className="grid grid-cols-3 gap-2">
-        {sensors.map((sensor) => (
-          <div
-            key={`${snap?.dataset_id ?? "src"}:${sensor.field_id}`}
-            className="min-w-0 rounded-xl border border-border bg-card p-2"
-          >
-            <div className="flex items-center justify-between gap-2">
-              <span className="font-mono text-sm">{sensor.field_id}</span>
-              <div className="flex min-w-0 items-center gap-2">
-                <span className="truncate font-mono text-[11px] text-muted-foreground">
-                  contrib {sensor.contribution.toFixed(2)}
-                </span>
-                <StatusChip status={sensor.status} />
-              </div>
-            </div>
-            <div className="mt-1 h-28">
-              <StreamChart
-                values={sensor.sparkline}
-                tick={snap?.tick}
-                className="h-28"
-                accent="rgb(82, 82, 91)"
-              />
-            </div>
-          </div>
-        ))}
+      <div className="mt-1 h-28">
+        <StreamChart
+          values={stream.sparkline}
+          tick={tick}
+          className="h-28"
+          accent="rgb(82, 82, 91)"
+        />
       </div>
-    </section>
+    </div>
   );
+});
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const text = String(reader.result ?? "");
+      const comma = text.indexOf(",");
+      resolve(comma >= 0 ? text.slice(comma + 1) : text);
+    };
+    reader.onerror = () => reject(reader.error ?? new Error("read failed"));
+    reader.readAsDataURL(file);
+  });
 }

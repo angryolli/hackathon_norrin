@@ -62,6 +62,9 @@ class DataSource(BaseModel):
     kind: Literal["process", "business", "other"] = "process"
     description: str = ""
     generator: Literal["industrial", "expenses"] = "industrial"
+    origin: Literal["generator", "api", "file"] = "generator"
+    api_url: str = ""
+    file_path: str = ""
     train_path: str = ""
     live_path: str = ""
     created_at: str = ""
@@ -74,6 +77,14 @@ class DataSourceCreate(BaseModel):
     kind: Literal["process", "business", "other"] = "process"
     description: str = ""
     generator: Literal["industrial", "expenses"] | None = None
+    origin: Literal["generator", "api", "file"] = "generator"
+    api_url: str = ""
+
+
+class DataSourceFileCreate(BaseModel):
+    name: str = ""
+    filename: str
+    content_b64: str
 
 
 class DataSourceUpdate(BaseModel):
@@ -266,6 +277,8 @@ class MonitorSnapshot(BaseModel):
     control_limit: float = 0.0
     live_boundary: int = 0
     fields: list[FieldCard] = Field(default_factory=list, max_length=40)
+    demo_fields: list[FieldCard] = Field(default_factory=list, max_length=80)
+    demo_tick: int = 0
     exclusion_list: list[str] = Field(default_factory=list, max_length=20)
     latest_event_id: str | None = None
     evidence: str = "Monitor snapshot is aggregated windows, not raw row dumps."
