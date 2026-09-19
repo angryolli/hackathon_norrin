@@ -26,6 +26,8 @@ from app.models.schemas import (
     DataSource,
     DataSourceCreate,
     DataSourceFileCreate,
+    DataSourcePreview,
+    DataSourcePreviewRequest,
     DataSourceUpdate,
     DecisionAppend,
     DecisionLogPage,
@@ -39,8 +41,15 @@ from app.models.schemas import (
     RankingArtifact,
     RolesArtifact,
     RuntimeConfig,
+    StreamControl,
 )
 from app.state import STATE
+
+
+_snapshot_subs: set[asyncio.Queue[MonitorSnapshot | None]] = set()
+_event_subs: set[asyncio.Queue[dict | None]] = set()
+_events_key: tuple | None = None
+_stopping = False
 
 
 def _wake(queues: set[asyncio.Queue]) -> None:
@@ -58,11 +67,14 @@ def _wake(queues: set[asyncio.Queue]) -> None:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    global _stopping
+    _stopping = False
     STATE.boot()
     task = asyncio.create_task(_stream())
     try:
         yield
     finally:
+        _stopping = True
         _wake(_snapshot_subs)
         _wake(_event_subs)
         task.cancel()
@@ -70,11 +82,6 @@ async def lifespan(_app: FastAPI):
             await task
         except asyncio.CancelledError:
             pass
-
-
-_snapshot_subs: set[asyncio.Queue[MonitorSnapshot | None]] = set()
-_event_subs: set[asyncio.Queue[dict | None]] = set()
-_events_key: tuple | None = None
 
 
 def _push(queue: asyncio.Queue, item: Any) -> None:
@@ -91,7 +98,7 @@ def _push(queue: asyncio.Queue, item: Any) -> None:
 
 async def _stream() -> None:
     global _events_key
-    while True:
+    while not _stopping:
         STATE.tick_live()
         snap = STATE.monitor()
         for queue in list(_snapshot_subs):
@@ -103,6 +110,13 @@ async def _stream() -> None:
             for queue in list(_event_subs):
                 _push(queue, payload)
         await asyncio.sleep(TICK_SECONDS)
+
+
+def _broadcast_snapshot() -> MonitorSnapshot:
+    snap = STATE.monitor()
+    for queue in list(_snapshot_subs):
+        _push(queue, snap)
+    return snap
 
 
 def _sse(event: str, data: str) -> str:
@@ -179,6 +193,16 @@ def data_sources_create(body: DataSourceCreate) -> DataSource:
         raise HTTPException(400, str(exc)) from exc
 
 
+@app.post("/data-sources/preview", response_model=DataSourcePreview)
+def data_sources_preview(body: DataSourcePreviewRequest) -> DataSourcePreview:
+    if not body.path.strip():
+        raise HTTPException(400, "file path is required")
+    try:
+        return DataSourcePreview(**STATE.preview_source(body.path))
+    except Exception as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
 @app.post("/data-sources/api", response_model=DataSource)
 def data_sources_api(body: DataSourceCreate) -> DataSource:
     try:
@@ -191,8 +215,12 @@ def data_sources_api(body: DataSourceCreate) -> DataSource:
 def data_sources_file(body: DataSourceFileCreate) -> DataSource:
     if not body.path.strip():
         raise HTTPException(400, "file path is required")
+    if not body.x_column.strip():
+        raise HTTPException(400, "x-axis column is required")
+    if not body.y_columns:
+        raise HTTPException(400, "at least one data column is required")
     try:
-        return STATE.add_file_source(body.path)
+        return STATE.add_file_source(body.path, body.x_column, body.y_columns)
     except Exception as exc:
         raise HTTPException(400, str(exc)) from exc
 
@@ -214,6 +242,12 @@ def data_sources_delete(source_id: str) -> dict:
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     return {"ok": True}
+
+
+@app.post("/stream/control", response_model=MonitorSnapshot)
+def stream_control(body: StreamControl) -> MonitorSnapshot:
+    STATE.set_playing(body.playing)
+    return _broadcast_snapshot()
 
 
 @app.post("/calibrate", response_model=CalibrateResponse)
@@ -293,9 +327,9 @@ async def events_stream() -> StreamingResponse:
         _event_subs.add(queue)
         try:
             yield _sse_events(STATE.events_snapshot())
-            while True:
+            while not _stopping:
                 try:
-                    payload = await asyncio.wait_for(queue.get(), timeout=1.0)
+                    payload = await asyncio.wait_for(queue.get(), timeout=0.4)
                 except asyncio.TimeoutError:
                     continue
                 if payload is None:
@@ -327,9 +361,9 @@ async def monitor_stream() -> StreamingResponse:
         _snapshot_subs.add(queue)
         try:
             yield _sse_snapshot(STATE.monitor())
-            while True:
+            while not _stopping:
                 try:
-                    snap = await asyncio.wait_for(queue.get(), timeout=1.0)
+                    snap = await asyncio.wait_for(queue.get(), timeout=0.4)
                 except asyncio.TimeoutError:
                     continue
                 if snap is None:

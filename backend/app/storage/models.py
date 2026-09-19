@@ -57,5 +57,7 @@ class DataSourceRecord(SQLModel, table=True):
     file_path: str = ""
     train_path: str = ""
     live_path: str = ""
+    x_column: str = ""
+    y_columns: str = "[]"
     created_at: str
     updated_at: str

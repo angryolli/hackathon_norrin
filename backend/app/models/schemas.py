@@ -37,6 +37,7 @@ class RuntimeConfig(BaseModel):
     baseline_established: bool = False
     no_egress: bool = False
     demo_data_uri: str = ""
+    playing: bool = False
 
 
 class ConfigUpdate(BaseModel):
@@ -68,6 +69,8 @@ class DataSource(BaseModel):
     file_path: str = ""
     train_path: str = ""
     live_path: str = ""
+    x_column: str = ""
+    y_columns: list[str] = Field(default_factory=list)
     created_at: str = ""
     updated_at: str = ""
     active: bool = False
@@ -77,10 +80,29 @@ class DataSourceCreate(BaseModel):
     origin: Literal["api", "file"] = "file"
     api_url: str = ""
     file_path: str = ""
+    x_column: str = ""
+    y_columns: list[str] = Field(default_factory=list)
 
 
 class DataSourceFileCreate(BaseModel):
     path: str
+    x_column: str = ""
+    y_columns: list[str] = Field(default_factory=list)
+
+
+class DataSourcePreviewRequest(BaseModel):
+    path: str
+
+
+class DataSourcePreview(BaseModel):
+    path: str
+    file_name: str
+    columns: list[str] = Field(default_factory=list)
+    numeric: list[str] = Field(default_factory=list)
+
+
+class StreamControl(BaseModel):
+    playing: bool
 
 
 class DataSourceUpdate(BaseModel):
@@ -262,6 +284,8 @@ class FieldCard(BaseModel):
     status: Chip
     contribution: float = 0.0
     evidence: str = ""
+    source_file: str = ""
+    source_id: str = ""
 
 
 class MonitorSnapshot(BaseModel):
@@ -277,6 +301,7 @@ class MonitorSnapshot(BaseModel):
     exclusion_list: list[str] = Field(default_factory=list, max_length=20)
     latest_event_id: str | None = None
     demo_data_uri: str = ""
+    playing: bool = False
     evidence: str = "Monitor snapshot is aggregated windows, not raw row dumps."
 
 

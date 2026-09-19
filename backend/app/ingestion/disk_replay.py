@@ -20,6 +20,9 @@ class DiskReplaySource:
 
     path: Path
     tick: int = 0
+    source_id: str = ""
+    file_name: str = ""
+    x_column: str = ""
     numeric_cols: list[str] = field(default_factory=list)
     sparklines: dict[str, deque[float]] = field(default_factory=dict)
     lock: Lock = field(default_factory=Lock)
@@ -28,10 +31,12 @@ class DiskReplaySource:
     _header: list[str] = field(default_factory=list)
     _numeric_idx: list[int] = field(default_factory=list)
 
-    def open(self) -> None:
+    def open(self, y_cols: list[str] | None = None, x_column: str = "") -> None:
         self.path = Path(self.path)
         if not self.path.is_file():
             raise FileNotFoundError(self.path)
+        self.file_name = self.path.name
+        self.x_column = x_column.strip()
         with self.path.open("r", newline="", encoding="utf-8", errors="replace") as fh:
             reader = csv.reader(fh)
             header = next(reader, None)
@@ -39,12 +44,18 @@ class DiskReplaySource:
                 raise ValueError(f"empty CSV: {self.path}")
             self._header = [str(c).strip() for c in header]
             sample = next(reader, None)
-        self.numeric_cols = _numeric_columns(self._header, sample)
+        names = set(self._header)
+        if y_cols:
+            self.numeric_cols = [
+                col for col in y_cols if col in names and col != self.x_column
+            ][:80]
+        else:
+            self.numeric_cols = [
+                col for col in _numeric_columns(self._header, sample) if col != self.x_column
+            ]
         index = {name: i for i, name in enumerate(self._header)}
-        self._numeric_idx = [index[col] for col in self.numeric_cols]
-        self.sparklines = {
-            col: deque(maxlen=SPARKLINE_POINTS) for col in self.numeric_cols
-        }
+        self._numeric_idx = [index[col] for col in self.numeric_cols if col in index]
+        self.sparklines = {col: deque(maxlen=SPARKLINE_POINTS) for col in self.numeric_cols}
         self._rewind()
 
     def _rewind(self) -> None:
@@ -78,10 +89,15 @@ class DiskReplaySource:
                     continue
             self.tick += 1
 
-    def cards(self) -> list[tuple[str, list[float]]]:
+    def cards(self) -> list[tuple[str, list[float], str, str]]:
         with self.lock:
             return [
-                (col, list(self.sparklines.get(col, ())))
+                (
+                    col,
+                    list(self.sparklines.get(col, ())),
+                    self.file_name,
+                    self.source_id,
+                )
                 for col in self.numeric_cols
             ]
 
@@ -122,3 +138,23 @@ def _numeric_columns(header: list[str], sample: list[str] | None) -> list[str]:
             continue
         cols.append(name)
     return cols[:80]
+
+
+def preview_headers(path: Path) -> dict:
+    """Read header + one sample row only. Never loads the rest of the file."""
+    path = Path(path).expanduser()
+    if not path.is_file():
+        raise FileNotFoundError(path)
+    with path.open("r", newline="", encoding="utf-8", errors="replace") as fh:
+        reader = csv.reader(fh)
+        header = next(reader, None)
+        if not header:
+            raise ValueError(f"empty CSV: {path}")
+        sample = next(reader, None)
+    columns = [str(c).strip() for c in header if str(c).strip()]
+    return {
+        "path": str(path.resolve()),
+        "file_name": path.name,
+        "columns": columns[:120],
+        "numeric": _numeric_columns([str(c).strip() for c in header], sample),
+    }

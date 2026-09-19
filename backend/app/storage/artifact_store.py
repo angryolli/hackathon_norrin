@@ -47,9 +47,11 @@ class ArtifactStore:
             rows = conn.execute(text("PRAGMA table_info(data_sources)")).fetchall()
             names = {row[1] for row in rows}
             additions = {
-                "origin": "TEXT DEFAULT 'generator'",
+                "origin": "TEXT DEFAULT 'file'",
                 "api_url": "TEXT DEFAULT ''",
                 "file_path": "TEXT DEFAULT ''",
+                "x_column": "TEXT DEFAULT ''",
+                "y_columns": "TEXT DEFAULT '[]'",
             }
             for col_name, ddl in additions.items():
                 if col_name not in names:
@@ -251,6 +253,13 @@ class ArtifactStore:
             return True
 
     def _source_dict(self, row: DataSourceRecord) -> dict:
+        raw_y = getattr(row, "y_columns", None) or "[]"
+        try:
+            y_columns = json.loads(raw_y) if isinstance(raw_y, str) else list(raw_y)
+        except (TypeError, ValueError):
+            y_columns = []
+        if not isinstance(y_columns, list):
+            y_columns = []
         return {
             "id": row.id,
             "name": row.name,
@@ -262,6 +271,8 @@ class ArtifactStore:
             "file_path": getattr(row, "file_path", None) or "",
             "train_path": row.train_path,
             "live_path": row.live_path,
+            "x_column": getattr(row, "x_column", None) or "",
+            "y_columns": [str(c) for c in y_columns],
             "created_at": row.created_at,
             "updated_at": row.updated_at,
         }
@@ -282,9 +293,11 @@ class ArtifactStore:
                         generator=spec["generator"],
                         origin=spec.get("origin") or "file",
                         api_url=spec.get("api_url") or "",
-                        file_path=spec.get("file_path") or "",
-                        train_path=spec["train_path"],
-                        live_path=spec["live_path"],
+                    file_path=spec.get("file_path") or "",
+                    train_path=spec["train_path"],
+                    live_path=spec["live_path"],
+                    x_column=spec.get("x_column") or "",
+                    y_columns=json.dumps(spec.get("y_columns") or []),
                         created_at=now,
                         updated_at=now,
                     )
@@ -316,6 +329,8 @@ class ArtifactStore:
                     file_path=body.get("file_path") or "",
                     train_path=body["train_path"],
                     live_path=body["live_path"],
+                    x_column=body.get("x_column") or "",
+                    y_columns=json.dumps(body.get("y_columns") or []),
                     created_at=now,
                     updated_at=now,
                 )
@@ -345,6 +360,11 @@ class ArtifactStore:
                 row.api_url = body["api_url"]
             if "file_path" in body and body["file_path"] is not None:
                 row.file_path = body["file_path"]
+            if "x_column" in body and body["x_column"] is not None:
+                row.x_column = body["x_column"]
+            if "y_columns" in body and body["y_columns"] is not None:
+                cols = body["y_columns"]
+                row.y_columns = json.dumps(cols if isinstance(cols, list) else [])
             row.updated_at = now
             session.add(row)
             session.commit()

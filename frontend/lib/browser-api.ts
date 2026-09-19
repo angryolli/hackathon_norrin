@@ -14,14 +14,30 @@ export async function browserGet<T>(path: string): Promise<T> {
   return (await res.json()) as T;
 }
 
-export async function browserPost<T>(path: string, body: unknown): Promise<T> {
+export async function browserPost<T>(
+  path: string,
+  body: unknown,
+  signal?: AbortSignal,
+): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
     cache: "no-store",
+    signal,
   });
-  if (!res.ok) throw new Error(`${path} ${res.status}`);
+  if (!res.ok) {
+    let detail = `${path} ${res.status}`;
+    try {
+      const payload = (await res.json()) as { detail?: unknown };
+      if (typeof payload.detail === "string" && payload.detail.trim()) {
+        detail = payload.detail;
+      }
+    } catch {
+      /* keep status text */
+    }
+    throw new Error(detail);
+  }
   return (await res.json()) as T;
 }
 
@@ -49,6 +65,8 @@ export type FieldCard = {
   status: Chip;
   contribution: number;
   evidence: string;
+  source_file?: string;
+  source_id?: string;
 };
 
 export type MonitorSnapshot = {
@@ -63,7 +81,15 @@ export type MonitorSnapshot = {
   exclusion_list: string[];
   latest_event_id: string | null;
   demo_data_uri?: string;
+  playing?: boolean;
   evidence: string;
+};
+
+export type DataSourcePreview = {
+  path: string;
+  file_name: string;
+  columns: string[];
+  numeric: string[];
 };
 
 export type DataSource = {
@@ -76,6 +102,8 @@ export type DataSource = {
   file_path: string;
   train_path: string;
   live_path: string;
+  x_column?: string;
+  y_columns?: string[];
   created_at: string;
   updated_at: string;
   active: boolean;
@@ -88,6 +116,7 @@ export type RuntimeConfig = {
   baseline_established: boolean;
   no_egress: boolean;
   demo_data_uri?: string;
+  playing?: boolean;
 };
 
 export type ChatSummary = {

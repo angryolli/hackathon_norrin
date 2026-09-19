@@ -13,7 +13,7 @@ from app.correlation.correlation_engine import correlate
 from app.diagnosis.contribution_ranking import rank_event
 from app.drift.calibration import DriftModel, fit_drift_model
 from app.drift.detector import score_batch
-from app.ingestion.disk_replay import DiskReplaySource
+from app.ingestion.disk_replay import DiskReplaySource, preview_headers
 from app.ingestion.files import dataframe_from_api, materialize_csv, write_csv
 from app.ingestion.labels import fault_free_segment
 from app.ingestion.loader import DetectedSchema, load_csv, process_frame
@@ -48,7 +48,8 @@ from app.storage.artifact_store import ArtifactStore
 
 @dataclass
 class AppState:
-    source: DiskReplaySource | None = None
+    replays: list[DiskReplaySource] = field(default_factory=list)
+    playing: bool = False
     store: ArtifactStore = field(default_factory=ArtifactStore)
     dataset_id: str = field(default_factory=default_dataset)
     no_egress: bool = False
@@ -70,35 +71,88 @@ class AppState:
     _monitor_key: tuple | None = None
     _monitor_snap: MonitorSnapshot | None = None
 
+    @property
+    def source(self) -> DiskReplaySource | None:
+        return self.replays[0] if self.replays else None
+
     def boot(self) -> None:
         self.store.seed_data_sources()
-        path = demo_data_path()
-        if path is None:
-            self._purge_generator_sources()
-            self.dataset_id = ""
-            self.source = None
-            return
-        try:
-            self.dataset_id = self._ensure_disk_source(path)
-        except Exception:
-            self.dataset_id = "demo_csv"
         self._purge_generator_sources()
-        self._open_disk(path)
-        try:
-            self.calibrate()
-        except Exception:
-            return
-
-    def _open_disk(self, path: Path) -> None:
-        csv_path = materialize_csv(path, DATA_DIR / "sources" / "demo.csv")
-        if self.source is not None:
+        path = demo_data_path()
+        if path is not None:
             try:
-                self.source.close()
+                self.dataset_id = self._ensure_disk_source(path)
+            except Exception:
+                self.dataset_id = "demo_csv"
+        else:
+            ids = self._source_ids()
+            self.dataset_id = ids[0] if ids else ""
+        self.playing = False
+
+    def preview_source(self, raw_path: str) -> dict:
+        path = Path(raw_path.strip()).expanduser()
+        csv_path = materialize_csv(path, DATA_DIR / "sources" / f"_preview_{path.stem}.csv")
+        return preview_headers(csv_path)
+
+    def _close_replays(self) -> None:
+        for replay in self.replays:
+            try:
+                replay.close()
             except Exception:
                 pass
-        replay = DiskReplaySource(csv_path)
-        replay.open()
-        self.source = replay
+        self.replays = []
+
+    def _configured_specs(self) -> list[dict]:
+        out: list[dict] = []
+        for row in self.store.list_data_sources():
+            origin = row.get("origin") or "file"
+            if origin not in ("api", "file"):
+                continue
+            x_column = str(row.get("x_column") or "").strip()
+            y_columns = row.get("y_columns") or []
+            if not x_column and not y_columns:
+                continue
+            try:
+                self._csv_path(row)
+            except ValueError:
+                continue
+            out.append(row)
+        return out
+
+    def _open_replays(self) -> None:
+        specs = self._configured_specs()
+        self._close_replays()
+        opened: list[DiskReplaySource] = []
+        for spec in specs:
+            try:
+                path = materialize_csv(
+                    self._csv_path(spec),
+                    DATA_DIR / "sources" / f"{spec['id']}.csv",
+                )
+                replay = DiskReplaySource(path, source_id=spec["id"])
+                y_cols = spec.get("y_columns") or []
+                replay.open(
+                    y_cols=list(y_cols) if y_cols else None,
+                    x_column=str(spec.get("x_column") or ""),
+                )
+                opened.append(replay)
+            except Exception:
+                continue
+        self.replays = opened
+        if opened:
+            self.dataset_id = opened[0].source_id or self.dataset_id
+
+    def set_playing(self, playing: bool) -> MonitorSnapshot:
+        self.playing = playing
+        if playing:
+            self._open_replays()
+            if self.model is None and self.replays:
+                try:
+                    self.calibrate()
+                except Exception:
+                    pass
+        self._monitor_key = None
+        return self.monitor()
 
     def _ensure_disk_source(self, path: Path) -> str:
         resolved = str(path.expanduser().resolve())
@@ -143,6 +197,8 @@ class AppState:
         origin = payload.get("origin") or "file"
         payload["origin"] = origin if origin in ("api", "file") else "file"
         payload["generator"] = payload.get("generator") or ""
+        payload["x_column"] = payload.get("x_column") or ""
+        payload["y_columns"] = list(payload.get("y_columns") or [])
         return DataSource(**payload, active=row["id"] == self.dataset_id)
 
     def list_data_sources(self) -> list[DataSource]:
@@ -170,14 +226,20 @@ class AppState:
         if spec is None:
             raise ValueError(f"unknown data source {source_id}")
         self.dataset_id = source_id
-        self._open_disk(self._csv_path(spec))
+        if self.playing:
+            self._open_replays()
 
     def _persist_table(self, source_id: str, frame: pd.DataFrame) -> str:
         dest = DATA_DIR / "sources" / f"{source_id}.csv"
         write_csv(frame, dest)
         return str(dest)
 
-    def add_file_source(self, raw_path: str) -> DataSource:
+    def add_file_source(
+        self,
+        raw_path: str,
+        x_column: str = "",
+        y_columns: list[str] | None = None,
+    ) -> DataSource:
         path = Path(raw_path.strip()).expanduser()
         csv_path = materialize_csv(path, DATA_DIR / "sources" / f"{path.stem}.csv")
         source_id = self._unique_source_id(path.stem or "file")
@@ -194,10 +256,12 @@ class AppState:
                 "file_path": resolved,
                 "train_path": resolved,
                 "live_path": resolved,
+                "x_column": x_column.strip(),
+                "y_columns": list(y_columns or []),
             }
         )
-        self._switch_stream(source_id)
-        self._recalibrate_after_switch()
+        if self.playing:
+            self._open_replays()
         return self._as_data_source(row)
 
     def add_api_source(self, api_url: str) -> DataSource:
@@ -222,8 +286,8 @@ class AppState:
                 "live_path": path,
             }
         )
-        self._switch_stream(source_id)
-        self._recalibrate_after_switch()
+        if self.playing:
+            self._open_replays()
         return self._as_data_source(row)
 
     def _recalibrate_after_switch(self) -> None:
@@ -238,7 +302,7 @@ class AppState:
     def add_data_source(self, body: DataSourceCreate) -> DataSource:
         if body.origin == "api" or body.api_url.strip():
             return self.add_api_source(body.api_url)
-        return self.add_file_source(body.file_path)
+        return self.add_file_source(body.file_path, body.x_column, body.y_columns)
 
     def patch_data_source(self, source_id: str, body: DataSourceUpdate) -> DataSource:
         current = self.store.get_data_source(source_id)
@@ -251,17 +315,14 @@ class AppState:
         return self._as_data_source(row)
 
     def remove_data_source(self, source_id: str) -> None:
-        remaining = [s for s in self.store.list_data_sources() if s["id"] != source_id]
-        if not remaining:
-            raise ValueError("at least one data source is required")
         if self.store.get_data_source(source_id) is None:
             raise KeyError(source_id)
-        switching = source_id == self.dataset_id
         if not self.store.delete_data_source(source_id):
             raise KeyError(source_id)
-        if switching:
-            self._switch_stream(remaining[0]["id"])
-            self._recalibrate_after_switch()
+        self.replays = [replay for replay in self.replays if replay.source_id != source_id]
+        ids = self._source_ids()
+        if self.dataset_id == source_id:
+            self.dataset_id = ids[0] if ids else ""
 
     def runtime_config(self) -> RuntimeConfig:
         return RuntimeConfig(
@@ -271,6 +332,7 @@ class AppState:
             baseline_established=self.model is not None,
             no_egress=self.no_egress,
             demo_data_uri=str(demo_data_path() or ""),
+            playing=self.playing,
         )
 
     def update_config(self, body: ConfigUpdate) -> RuntimeConfig:
@@ -400,18 +462,14 @@ class AppState:
         return artifact
 
     def tick_live(self) -> None:
-        if self.source is None:
-            path = demo_data_path()
-            if path is None:
-                return
-            try:
-                self._open_disk(path)
-            except Exception:
-                return
-        self.source.emit()
-        if self.model is None:
+        if not self.playing or not self.replays:
             return
-        if self.source.tick % 2 != 0:
+        for replay in self.replays:
+            replay.emit()
+        head = self.source
+        if head is None or self.model is None:
+            return
+        if head.tick % 2 != 0:
             return
         try:
             self.quality_check()
@@ -420,10 +478,18 @@ class AppState:
             return
 
     def monitor(self) -> MonitorSnapshot:
-        tick = self.source.tick if self.source is not None else 0
+        tick = self.replays[0].tick if self.replays else 0
         latest = self.drift.latest_event_id if self.drift else None
         quality_id = id(self.quality)
-        key = (self.dataset_id, self.calibration_id, tick, latest, quality_id)
+        key = (
+            self.dataset_id,
+            self.calibration_id,
+            tick,
+            latest,
+            quality_id,
+            self.playing,
+            tuple(replay.source_id for replay in self.replays),
+        )
         if self._monitor_snap is not None and self._monitor_key == key:
             return self._monitor_snap
         snap = self._build_monitor(tick)
@@ -443,8 +509,10 @@ class AppState:
             p.field_id: p.frozen_rate for p in (self.profile.fields if self.profile else [])
         }
         cards: list[FieldCard] = []
-        traces = self.source.cards() if self.source is not None else []
-        for col, spark in traces:
+        traces: list[tuple[str, list[float], str, str]] = []
+        for replay in self.replays:
+            traces.extend(replay.cards())
+        for col, spark, file_name, source_id in traces:
             status: Chip = "normal"
             evidence = "within frozen baseline"
             if len(spark) > 5:
@@ -468,10 +536,13 @@ class AppState:
                     status=status,
                     contribution=float(contrib_map.get(col, 0)),
                     evidence=evidence,
+                    source_file=file_name,
+                    source_id=source_id,
                 )
             )
         cards.sort(
             key=lambda c: (
+                c.source_file,
                 int("".join(ch for ch in c.field_id if ch.isdigit()) or "999999"),
                 c.field_id,
             )
@@ -489,6 +560,7 @@ class AppState:
             exclusion_list=list(excl)[:20],
             latest_event_id=self.drift.latest_event_id if self.drift else None,
             demo_data_uri=str(demo_data_path() or ""),
+            playing=self.playing,
         )
 
     def add_rule(self, rule: RuleSchema) -> CompileRuleResponse:
