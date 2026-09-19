@@ -88,6 +88,7 @@ class AppState:
             ids = self._source_ids()
             self.dataset_id = ids[0] if ids else ""
         self.playing = False
+        self._restore_simulation()
 
     def preview_source(self, raw_path: str) -> dict:
         path = Path(raw_path.strip()).expanduser()
@@ -119,39 +120,116 @@ class AppState:
             out.append(row)
         return out
 
-    def _open_replays(self) -> None:
-        specs = self._configured_specs()
+    def _history_map(self) -> dict[str, dict]:
+        return {row["source_id"]: row for row in self.store.list_simulation_sources()}
+
+    def _make_replay(self, spec: dict, history: dict | None) -> DiskReplaySource | None:
+        try:
+            path = materialize_csv(
+                self._csv_path(spec),
+                DATA_DIR / "sources" / f"{spec['id']}.csv",
+            )
+            replay = DiskReplaySource(path, source_id=spec["id"])
+            y_cols = spec.get("y_columns") or []
+            origin = spec.get("origin") or "file"
+            replay.open(
+                y_cols=None if origin == "api" and not y_cols else list(y_cols),
+                x_column=str(spec.get("x_column") or ""),
+            )
+            if history:
+                replay.restore(
+                    int(history.get("file_offset") or 0),
+                    int(history.get("tick") or 0),
+                    history.get("sparklines") or {},
+                )
+            return replay
+        except Exception:
+            return None
+
+    def _open_replays(self, *, resume: bool = True) -> None:
+        history = self._history_map() if resume else {}
         self._close_replays()
         opened: list[DiskReplaySource] = []
-        for spec in specs:
-            try:
-                path = materialize_csv(
-                    self._csv_path(spec),
-                    DATA_DIR / "sources" / f"{spec['id']}.csv",
-                )
-                replay = DiskReplaySource(path, source_id=spec["id"])
-                y_cols = spec.get("y_columns") or []
-                replay.open(
-                    y_cols=list(y_cols) if y_cols else None,
-                    x_column=str(spec.get("x_column") or ""),
-                )
+        for spec in self._configured_specs():
+            replay = self._make_replay(spec, history.get(spec["id"]) if resume else None)
+            if replay is not None:
                 opened.append(replay)
-            except Exception:
-                continue
         self.replays = opened
         if opened:
             self.dataset_id = opened[0].source_id or self.dataset_id
 
+    def _attach_replay(self, spec: dict) -> None:
+        if any(replay.source_id == spec["id"] for replay in self.replays):
+            return
+        replay = self._make_replay(spec, None)
+        if replay is None:
+            return
+        self.replays.append(replay)
+        if not self.dataset_id:
+            self.dataset_id = replay.source_id
+
+    def _persist_simulation(self) -> None:
+        tick = self.replays[0].tick if self.replays else 0
+        try:
+            self.store.save_simulation(
+                self.playing,
+                tick,
+                list(self.t2_history),
+                [replay.progress() for replay in self.replays],
+            )
+        except Exception:
+            return
+
+    def _restore_simulation(self) -> None:
+        saved = self.store.get_simulation_state()
+        self._open_replays(resume=True)
+        self.t2_history = list(saved.get("t2_history") or [])
+        want_play = bool(saved.get("playing"))
+        if want_play and self.replays:
+            if self.model is None:
+                try:
+                    self.calibrate()
+                except Exception:
+                    pass
+            self.playing = True
+        else:
+            self.playing = False
+        self._persist_simulation()
+
     def set_playing(self, playing: bool) -> MonitorSnapshot:
-        self.playing = playing
         if playing:
-            self._open_replays()
+            if not self.replays:
+                self._open_replays(resume=True)
+            for spec in self._configured_specs():
+                self._attach_replay(spec)
             if self.model is None and self.replays:
                 try:
                     self.calibrate()
                 except Exception:
                     pass
+            self.playing = bool(self.replays)
+        else:
+            self.playing = False
         self._monitor_key = None
+        self._persist_simulation()
+        return self.monitor()
+
+    def reset_simulation(self) -> MonitorSnapshot:
+        self.playing = False
+        if not self.replays:
+            self._open_replays(resume=False)
+        else:
+            for replay in self.replays:
+                replay.reset_progress()
+        self.events.clear()
+        self.rankings.clear()
+        self.t2_history.clear()
+        self.confirmed.clear()
+        self.overrides.clear()
+        self.quality = None
+        self.drift = None
+        self._monitor_key = None
+        self._persist_simulation()
         return self.monitor()
 
     def _ensure_disk_source(self, path: Path) -> str:
@@ -226,8 +304,8 @@ class AppState:
         if spec is None:
             raise ValueError(f"unknown data source {source_id}")
         self.dataset_id = source_id
-        if self.playing:
-            self._open_replays()
+        if self.playing or self.replays:
+            self._attach_replay(spec)
 
     def _persist_table(self, source_id: str, frame: pd.DataFrame) -> str:
         dest = DATA_DIR / "sources" / f"{source_id}.csv"
@@ -260,8 +338,9 @@ class AppState:
                 "y_columns": list(y_columns or []),
             }
         )
-        if self.playing:
-            self._open_replays()
+        if self.playing or self.replays:
+            self._attach_replay(row)
+        self._persist_simulation()
         return self._as_data_source(row)
 
     def add_api_source(self, api_url: str) -> DataSource:
@@ -286,8 +365,9 @@ class AppState:
                 "live_path": path,
             }
         )
-        if self.playing:
-            self._open_replays()
+        if self.playing or self.replays:
+            self._attach_replay(row)
+        self._persist_simulation()
         return self._as_data_source(row)
 
     def _recalibrate_after_switch(self) -> None:
@@ -315,14 +395,57 @@ class AppState:
         return self._as_data_source(row)
 
     def remove_data_source(self, source_id: str) -> None:
-        if self.store.get_data_source(source_id) is None:
-            raise KeyError(source_id)
-        if not self.store.delete_data_source(source_id):
-            raise KeyError(source_id)
-        self.replays = [replay for replay in self.replays if replay.source_id != source_id]
+        self.remove_data_sources([source_id])
+
+    def remove_fields(self, items: list[dict]) -> None:
+        grouped: dict[str, set[str]] = {}
+        for item in items:
+            source_id = str(item.get("source_id") or "").strip()
+            field_id = str(item.get("field_id") or "").strip()
+            if source_id and field_id:
+                grouped.setdefault(source_id, set()).add(field_id)
+        if not grouped:
+            return
+        for source_id, fields in grouped.items():
+            spec = self.store.get_data_source(source_id)
+            if spec is None:
+                continue
+            current = list(spec.get("y_columns") or [])
+            if not current:
+                for replay in self.replays:
+                    if replay.source_id == source_id:
+                        current = list(replay.numeric_cols)
+                        break
+            remaining = [col for col in current if col not in fields]
+            self.store.update_data_source(source_id, {"y_columns": remaining})
+            for replay in self.replays:
+                if replay.source_id == source_id:
+                    replay.drop_columns(list(fields))
+        self._monitor_key = None
+        self._persist_simulation()
+
+    def remove_data_sources(self, source_ids: list[str]) -> None:
+        wanted = [sid for sid in source_ids if sid]
+        if not wanted:
+            return
+        missing = [sid for sid in wanted if self.store.get_data_source(sid) is None]
+        if missing:
+            raise KeyError(missing[0])
+        drop = set(wanted)
+        for replay in [item for item in self.replays if item.source_id in drop]:
+            try:
+                replay.close()
+            except Exception:
+                pass
+        self.replays = [replay for replay in self.replays if replay.source_id not in drop]
+        for source_id in wanted:
+            if not self.store.delete_data_source(source_id):
+                raise KeyError(source_id)
         ids = self._source_ids()
-        if self.dataset_id == source_id:
+        if self.dataset_id in drop:
             self.dataset_id = ids[0] if ids else ""
+        self._monitor_key = None
+        self._persist_simulation()
 
     def runtime_config(self) -> RuntimeConfig:
         return RuntimeConfig(
@@ -466,6 +589,7 @@ class AppState:
             return
         for replay in self.replays:
             replay.emit()
+        self._persist_simulation()
         head = self.source
         if head is None or self.model is None:
             return

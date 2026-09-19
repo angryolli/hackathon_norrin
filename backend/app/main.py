@@ -24,6 +24,7 @@ from app.models.schemas import (
     ConfigUpdate,
     CorrelationArtifact,
     DataSource,
+    DataSourceBulkDelete,
     DataSourceCreate,
     DataSourceFileCreate,
     DataSourcePreview,
@@ -244,9 +245,23 @@ def data_sources_delete(source_id: str) -> dict:
     return {"ok": True}
 
 
+@app.post("/data-sources/bulk-delete")
+def data_sources_bulk_delete(body: DataSourceBulkDelete) -> MonitorSnapshot:
+    if not body.fields:
+        raise HTTPException(400, "no data sources selected")
+    STATE.remove_fields([item.model_dump() for item in body.fields])
+    return _broadcast_snapshot()
+
+
 @app.post("/stream/control", response_model=MonitorSnapshot)
 def stream_control(body: StreamControl) -> MonitorSnapshot:
     STATE.set_playing(body.playing)
+    return _broadcast_snapshot()
+
+
+@app.post("/stream/reset", response_model=MonitorSnapshot)
+def stream_reset() -> MonitorSnapshot:
+    STATE.reset_simulation()
     return _broadcast_snapshot()
 
 

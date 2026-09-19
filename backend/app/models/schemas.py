@@ -105,6 +105,15 @@ class StreamControl(BaseModel):
     playing: bool
 
 
+class DataSourceFieldRef(BaseModel):
+    source_id: str
+    field_id: str
+
+
+class DataSourceBulkDelete(BaseModel):
+    fields: list[DataSourceFieldRef] = Field(default_factory=list)
+
+
 class DataSourceUpdate(BaseModel):
     name: str | None = None
     kind: Literal["process", "business", "other"] | None = None

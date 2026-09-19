@@ -18,6 +18,8 @@ from app.storage.models import (
     ChatMessageRecord,
     DataSourceRecord,
     DecisionLogRecord,
+    SimulationSourceHistoryRecord,
+    SimulationStateRecord,
 )
 
 DB_PATH = ARTIFACT_DIR / "monitor.sqlite"
@@ -376,6 +378,127 @@ class ArtifactStore:
             row = session.get(DataSourceRecord, source_id)
             if row is None:
                 return False
+            hist = session.get(SimulationSourceHistoryRecord, source_id)
+            if hist is not None:
+                session.delete(hist)
             session.delete(row)
             session.commit()
             return True
+
+    def get_simulation_state(self) -> dict:
+        with self._lock, self._session() as session:
+            row = session.get(SimulationStateRecord, "current")
+            if row is None:
+                return {"playing": False, "tick": 0, "t2_history": []}
+            try:
+                t2_history = json.loads(row.t2_history or "[]")
+            except (TypeError, ValueError):
+                t2_history = []
+            if not isinstance(t2_history, list):
+                t2_history = []
+            return {
+                "playing": bool(row.playing),
+                "tick": int(row.tick or 0),
+                "t2_history": [float(v) for v in t2_history],
+            }
+
+    def list_simulation_sources(self) -> list[dict]:
+        with self._lock, self._session() as session:
+            rows = session.exec(select(SimulationSourceHistoryRecord)).all()
+            return [self._history_dict(row) for row in rows]
+
+    def delete_simulation_source(self, source_id: str) -> None:
+        with self._lock, self._session() as session:
+            row = session.get(SimulationSourceHistoryRecord, source_id)
+            if row is None:
+                return
+            session.delete(row)
+            session.commit()
+
+    def save_simulation(self, playing: bool, tick: int, t2_history: list, sources: list[dict]) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._lock, self._session() as session:
+            state = session.get(SimulationStateRecord, "current")
+            payload = json.dumps([float(v) for v in t2_history[-60:]])
+            if state is None:
+                session.add(
+                    SimulationStateRecord(
+                        id="current",
+                        playing=playing,
+                        tick=tick,
+                        t2_history=payload,
+                        updated_at=now,
+                    )
+                )
+            else:
+                state.playing = playing
+                state.tick = tick
+                state.t2_history = payload
+                state.updated_at = now
+                session.add(state)
+            keep = {str(item.get("source_id") or "") for item in sources}
+            keep.discard("")
+            existing = session.exec(select(SimulationSourceHistoryRecord)).all()
+            for row in existing:
+                if row.source_id not in keep:
+                    session.delete(row)
+            for item in sources:
+                source_id = str(item.get("source_id") or "")
+                if not source_id:
+                    continue
+                y_columns = item.get("y_columns") or []
+                sparklines = item.get("sparklines") or {}
+                rec = session.get(SimulationSourceHistoryRecord, source_id)
+                if rec is None:
+                    session.add(
+                        SimulationSourceHistoryRecord(
+                            source_id=source_id,
+                            file_path=str(item.get("file_path") or ""),
+                            file_name=str(item.get("file_name") or ""),
+                            x_column=str(item.get("x_column") or ""),
+                            y_columns=json.dumps(y_columns if isinstance(y_columns, list) else []),
+                            tick=int(item.get("tick") or 0),
+                            file_offset=int(item.get("file_offset") or 0),
+                            sparklines=json.dumps(sparklines if isinstance(sparklines, dict) else {}),
+                            updated_at=now,
+                        )
+                    )
+                else:
+                    rec.file_path = str(item.get("file_path") or "")
+                    rec.file_name = str(item.get("file_name") or "")
+                    rec.x_column = str(item.get("x_column") or "")
+                    rec.y_columns = json.dumps(y_columns if isinstance(y_columns, list) else [])
+                    rec.tick = int(item.get("tick") or 0)
+                    rec.file_offset = int(item.get("file_offset") or 0)
+                    rec.sparklines = json.dumps(sparklines if isinstance(sparklines, dict) else {})
+                    rec.updated_at = now
+                    session.add(rec)
+            session.commit()
+
+    def _history_dict(self, row: SimulationSourceHistoryRecord) -> dict:
+        try:
+            y_columns = json.loads(row.y_columns or "[]")
+        except (TypeError, ValueError):
+            y_columns = []
+        if not isinstance(y_columns, list):
+            y_columns = []
+        try:
+            sparklines = json.loads(row.sparklines or "{}")
+        except (TypeError, ValueError):
+            sparklines = {}
+        if not isinstance(sparklines, dict):
+            sparklines = {}
+        return {
+            "source_id": row.source_id,
+            "file_path": row.file_path,
+            "file_name": row.file_name,
+            "x_column": row.x_column,
+            "y_columns": [str(c) for c in y_columns],
+            "tick": int(row.tick or 0),
+            "file_offset": int(row.file_offset or 0),
+            "sparklines": {
+                str(col): [float(v) for v in values]
+                for col, values in sparklines.items()
+                if isinstance(values, list)
+            },
+        }

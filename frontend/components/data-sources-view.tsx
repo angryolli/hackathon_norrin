@@ -1,19 +1,32 @@
 "use client";
 
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import { Pause, Play, Plus, X } from "lucide-react";
+import { Plus, RotateCcw, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { StatusChip } from "@/components/status-chip";
 import { StreamChart } from "@/components/stream-chart";
 import {
+  browserGet,
   browserPost,
   monitorStreamUrl,
+  type DataSource,
   type DataSourcePreview,
   type FieldCard,
   type MonitorSnapshot,
 } from "@/lib/browser-api";
+import { useSimulation } from "@/components/simulation-context";
 import { cn } from "@/lib/utils";
+
+function sourceKey(sourceId: string, fieldId: string) {
+  return `${sourceId}\t${fieldId}`;
+}
+
+function parseSourceKey(key: string) {
+  const idx = key.indexOf("\t");
+  if (idx < 0) return { source_id: "", field_id: key };
+  return { source_id: key.slice(0, idx), field_id: key.slice(idx + 1) };
+}
 
 type OriginChoice = "api" | "file" | null;
 
@@ -33,7 +46,13 @@ export function DataSourcesView() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [snap, setSnap] = useState<MonitorSnapshot | null>(null);
-  const ticksRef = useRef({ tick: -1, demo: -1, dataset: "", playing: false });
+  const [sources, setSources] = useState<DataSource[]>([]);
+  const [resetOpen, setResetOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const ticksRef = useRef({ tick: -1, demo: -1, dataset: "", playing: false, fields: "" });
+  const { setPlaying } = useSimulation();
 
   useEffect(() => {
     let on = true;
@@ -41,10 +60,14 @@ export function DataSourcesView() {
 
     function apply(data: MonitorSnapshot) {
       if (!on) return;
+      const fieldKey = (data.fields ?? [])
+        .map((field) => `${field.source_id ?? ""}:${field.field_id}`)
+        .join("|");
       if (
         data.tick === ticksRef.current.tick &&
         data.dataset_id === ticksRef.current.dataset &&
-        Boolean(data.playing) === ticksRef.current.playing
+        Boolean(data.playing) === ticksRef.current.playing &&
+        fieldKey === ticksRef.current.fields
       ) {
         return;
       }
@@ -53,8 +76,10 @@ export function DataSourcesView() {
         demo: data.tick,
         dataset: data.dataset_id,
         playing: Boolean(data.playing),
+        fields: fieldKey,
       };
       setSnap(data);
+      setPlaying(Boolean(data.playing));
     }
 
     function connect() {
@@ -92,16 +117,42 @@ export function DataSourcesView() {
       document.removeEventListener("visibilitychange", onVis);
       source?.close();
     };
+  }, [setPlaying]);
+
+  async function loadSources() {
+    try {
+      setSources(await browserGet<DataSource[]>("/data-sources"));
+    } catch {
+      setSources([]);
+    }
+  }
+
+  useEffect(() => {
+    void loadSources();
   }, []);
 
   useEffect(() => {
-    if (!adding) return;
+    if (!adding && !resetOpen && !deleteOpen && !deleting) return;
     function onKey(event: KeyboardEvent) {
-      if (event.key === "Escape") closeModal();
+      if (event.key !== "Escape") return;
+      if (deleteOpen) {
+        setDeleteOpen(false);
+        return;
+      }
+      if (deleting) {
+        setDeleting(false);
+        setSelected(new Set());
+        return;
+      }
+      if (resetOpen) {
+        setResetOpen(false);
+        return;
+      }
+      if (adding) closeModal();
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [adding]);
+  }, [adding, resetOpen, deleteOpen, deleting]);
 
   useEffect(() => {
     if (!adding || choice !== "file") return;
@@ -200,6 +251,7 @@ export function DataSourcesView() {
         return;
       }
       closeModal();
+      await loadSources();
     } catch (err) {
       setError(err instanceof Error ? err.message : "add failed");
     } finally {
@@ -207,21 +259,58 @@ export function DataSourcesView() {
     }
   }
 
-  async function togglePlay() {
-    const next = !(snap?.playing ?? false);
+  function applySnap(updated: MonitorSnapshot) {
+    const fieldKey = (updated.fields ?? [])
+      .map((field) => `${field.source_id ?? ""}:${field.field_id}`)
+      .join("|");
+    ticksRef.current = {
+      tick: updated.tick,
+      demo: updated.tick,
+      dataset: updated.dataset_id,
+      playing: Boolean(updated.playing),
+      fields: fieldKey,
+    };
+    setSnap(updated);
+    setPlaying(Boolean(updated.playing));
+  }
+
+  function toggleSelected(key: string) {
+    if (!key) return;
+    setDeleting(true);
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  async function confirmReset() {
+    setBusy(true);
     try {
-      const updated = await browserPost<MonitorSnapshot>("/stream/control", {
-        playing: next,
-      });
-      ticksRef.current = {
-        tick: updated.tick,
-        demo: updated.tick,
-        dataset: updated.dataset_id,
-        playing: Boolean(updated.playing),
-      };
-      setSnap(updated);
+      applySnap(await browserPost<MonitorSnapshot>("/stream/reset", {}));
+      setResetOpen(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "play control failed");
+      setError(err instanceof Error ? err.message : "reset failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function confirmDelete() {
+    const fields = [...selected].map(parseSourceKey).filter((item) => item.source_id && item.field_id);
+    if (fields.length === 0) return;
+    setBusy(true);
+    try {
+      applySnap(await browserPost<MonitorSnapshot>("/data-sources/bulk-delete", { fields }));
+      setDeleteOpen(false);
+      setDeleting(false);
+      setSelected(new Set());
+      await loadSources();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "delete failed");
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -245,25 +334,103 @@ export function DataSourcesView() {
     });
   }, [snap]);
 
-  const playing = Boolean(snap?.playing);
+  const configuredSources = useMemo(() => {
+    return sources.filter(
+      (source) => Boolean(source.x_column) || (source.y_columns?.length ?? 0) > 0,
+    );
+  }, [sources]);
+
+  const idleFields = useMemo(() => {
+    const seen = new Set(
+      streams.map((stream) => sourceKey(stream.source_id ?? "", stream.field_id)),
+    );
+    return configuredSources.flatMap((source) =>
+      (source.y_columns ?? [])
+        .filter((column) => !seen.has(sourceKey(source.id, column)))
+        .map((column) => ({
+          source,
+          field_id: column,
+          key: sourceKey(source.id, column),
+          file_name: source.file_path.split(/[/\\]/).pop() || source.name,
+        })),
+    );
+  }, [configuredSources, streams]);
+
+  const allFieldKeys = useMemo(() => {
+    const keys = streams.map((stream) => sourceKey(stream.source_id ?? "", stream.field_id));
+    for (const field of idleFields) keys.push(field.key);
+    return keys.filter(Boolean);
+  }, [idleFields, streams]);
+
+  const selectedLabels = useMemo(() => {
+    const names = new Map<string, string>();
+    for (const stream of streams) {
+      names.set(
+        sourceKey(stream.source_id ?? "", stream.field_id),
+        `${stream.field_id} · ${stream.source_file || "file"}`,
+      );
+    }
+    for (const field of idleFields) {
+      names.set(field.key, `${field.field_id} · ${field.file_name}`);
+    }
+    return [...selected].map((key) => names.get(key) || key).filter(Boolean);
+  }, [idleFields, selected, streams]);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex h-11 shrink-0 items-center gap-3 border-b border-border px-4">
-        <Button
-          size="icon-sm"
-          variant={playing ? "secondary" : "default"}
-          onClick={() => void togglePlay()}
-          aria-label={playing ? "Pause" : "Play"}
-        >
-          {playing ? <Pause /> : <Play />}
+      <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border px-4">
+        <Button size="sm" variant="outline" onClick={() => setResetOpen(true)}>
+          <RotateCcw />
+          Reset
         </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={allFieldKeys.length === 0}
+          onClick={() => {
+            if (selected.size === 0) {
+              setDeleting(true);
+              return;
+            }
+            setDeleteOpen(true);
+          }}
+        >
+          <Trash2 />
+          Delete sources
+        </Button>
+        {deleting && (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={allFieldKeys.length === 0}
+            onClick={() => {
+              setSelected(new Set(allFieldKeys));
+            }}
+          >
+            Select all
+          </Button>
+        )}
+        {deleting && (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              setDeleting(false);
+              setSelected(new Set());
+              setDeleteOpen(false);
+            }}
+          >
+            Cancel
+          </Button>
+        )}
         <span className="text-sm text-muted-foreground">
-          {playing
-            ? "Playing all sources"
+          {deleting
+            ? selected.size > 0
+              ? `${selected.size} selected`
+              : "Select y-axis sources to remove"
             : streams.length === 0
-              ? "Add sources, then play"
-              : "Paused"}
+              ? "Add sources, then play from the sidebar"
+              : "Simulation progress is kept when you pause"}
         </span>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
@@ -279,13 +446,36 @@ export function DataSourcesView() {
           >
             <Plus className="size-8" strokeWidth={1.5} />
           </button>
-          {streams.map((stream) => (
+          {idleFields.map((field) => (
             <StreamTile
-              key={`${stream.source_id ?? snap?.dataset_id ?? "src"}:${stream.field_id}`}
-              stream={stream}
-              tick={snap?.tick}
+              key={field.key}
+              stream={{
+                field_id: field.field_id,
+                sparkline: [],
+                status: "normal",
+                contribution: 0,
+                evidence: "",
+                source_file: field.file_name,
+                source_id: field.source.id,
+              }}
+              deleting={deleting}
+              selected={selected.has(field.key)}
+              onSelect={() => toggleSelected(field.key)}
             />
           ))}
+          {streams.map((stream) => {
+            const key = sourceKey(stream.source_id ?? "", stream.field_id);
+            return (
+              <StreamTile
+                key={key}
+                stream={stream}
+                tick={snap?.tick}
+                deleting={deleting}
+                selected={selected.has(key)}
+                onSelect={() => toggleSelected(key)}
+              />
+            );
+          })}
         </div>
       </div>
 
@@ -436,6 +626,81 @@ export function DataSourcesView() {
           </div>
         </div>
       )}
+
+      {resetOpen && (
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setResetOpen(false)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="reset-sim-title"
+            className="w-full max-w-md rounded-xl border border-border bg-card p-4 shadow-lg"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="reset-sim-title" className="text-sm font-medium">
+              Reset simulation
+            </h2>
+            <p className="mt-2 text-sm text-muted-foreground">
+              This clears current playback progress and chart history. Data sources stay in
+              place.
+            </p>
+            {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
+            <div className="mt-4 flex justify-end gap-2">
+              <Button variant="ghost" onClick={() => setResetOpen(false)}>
+                Cancel
+              </Button>
+              <Button disabled={busy} onClick={() => void confirmReset()}>
+                Clear progress
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteOpen && (
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setDeleteOpen(false)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-sources-title"
+            className="w-full max-w-md rounded-xl border border-border bg-card p-4 shadow-lg"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="delete-sources-title" className="text-sm font-medium">
+              Delete data sources
+            </h2>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Remove {selected.size} y-axis source{selected.size === 1 ? "" : "s"} from
+              the current simulation. The original file stays.
+            </p>
+            {selectedLabels.length > 0 && (
+              <ul className="mt-3 max-h-32 list-disc overflow-y-auto pl-5 text-sm">
+                {selectedLabels.map((name) => (
+                  <li key={name}>{name}</li>
+                ))}
+              </ul>
+            )}
+            {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
+            <div className="mt-4 flex justify-end gap-2">
+              <Button variant="ghost" onClick={() => setDeleteOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                disabled={busy || selected.size === 0}
+                onClick={() => void confirmDelete()}
+              >
+                Delete
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -445,16 +710,42 @@ const STREAM_CARD = "box-border h-52 min-w-0 rounded-xl border bg-card p-2";
 const StreamTile = memo(function StreamTile({
   stream,
   tick,
+  deleting,
+  selected,
+  onSelect,
 }: {
   stream: FieldCard;
   tick?: number;
+  deleting?: boolean;
+  selected?: boolean;
+  onSelect?: () => void;
 }) {
   return (
     <div
-      className={STREAM_CARD}
+      className={cn(
+        STREAM_CARD,
+        "relative",
+        selected && "border-blue-500 ring-2 ring-blue-500",
+      )}
       style={{ contentVisibility: "auto", containIntrinsicSize: "auto 13rem" }}
+      onClick={deleting ? onSelect : undefined}
     >
-      <div className="flex items-start justify-between gap-2">
+      {deleting && (
+        <button
+          type="button"
+          className={cn(
+            "absolute top-1.5 right-1.5 z-10 size-4 rounded-full border-2 border-white",
+            selected ? "bg-blue-500" : "bg-transparent",
+          )}
+          aria-label={`Select ${stream.field_id}`}
+          aria-pressed={selected}
+          onClick={(event) => {
+            event.stopPropagation();
+            onSelect?.();
+          }}
+        />
+      )}
+      <div className="flex items-start justify-between gap-2 pr-6">
         <div className="min-w-0">
           <div className="truncate font-mono text-sm">{stream.field_id}</div>
           <div className="truncate text-[11px] text-muted-foreground">

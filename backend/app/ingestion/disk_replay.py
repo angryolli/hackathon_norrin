@@ -30,6 +30,7 @@ class DiskReplaySource:
     _reader: object | None = None
     _header: list[str] = field(default_factory=list)
     _numeric_idx: list[int] = field(default_factory=list)
+    file_offset: int = 0
 
     def open(self, y_cols: list[str] | None = None, x_column: str = "") -> None:
         self.path = Path(self.path)
@@ -45,7 +46,7 @@ class DiskReplaySource:
             self._header = [str(c).strip() for c in header]
             sample = next(reader, None)
         names = set(self._header)
-        if y_cols:
+        if y_cols is not None:
             self.numeric_cols = [
                 col for col in y_cols if col in names and col != self.x_column
             ][:80]
@@ -56,7 +57,17 @@ class DiskReplaySource:
         index = {name: i for i, name in enumerate(self._header)}
         self._numeric_idx = [index[col] for col in self.numeric_cols if col in index]
         self.sparklines = {col: deque(maxlen=SPARKLINE_POINTS) for col in self.numeric_cols}
+        self.tick = 0
         self._rewind()
+
+    def _tell(self) -> int:
+        fh = self._fh
+        if fh is None:
+            return self.file_offset
+        try:
+            return int(fh.tell())
+        except Exception:
+            return self.file_offset
 
     def _rewind(self) -> None:
         if self._fh is not None:
@@ -66,6 +77,51 @@ class DiskReplaySource:
         next(reader, None)
         self._fh = fh
         self._reader = reader
+        self.file_offset = self._tell()
+
+    def restore(self, offset: int, tick: int, sparklines: dict[str, list[float]]) -> None:
+        """Replay-read `tick` rows from the header so the cursor matches paused progress."""
+        with self.lock:
+            for col, values in (sparklines or {}).items():
+                if col not in self.numeric_cols:
+                    continue
+                self.sparklines[col] = deque(
+                    (float(v) for v in values[-SPARKLINE_POINTS:]),
+                    maxlen=SPARKLINE_POINTS,
+                )
+            self._rewind()
+            remaining = max(0, int(tick or 0))
+            while remaining > 0 and self._reader is not None:
+                row = next(self._reader, None)
+                if row is None:
+                    self._rewind()
+                    row = next(self._reader, None) if self._reader is not None else None
+                    if row is None:
+                        break
+                remaining -= 1
+            self.tick = int(tick or 0)
+            self.file_offset = int(offset or self._tell())
+
+    def reset_progress(self) -> None:
+        with self.lock:
+            self.sparklines = {col: deque(maxlen=SPARKLINE_POINTS) for col in self.numeric_cols}
+            self.tick = 0
+            self._rewind()
+
+    def progress(self) -> dict:
+        with self.lock:
+            return {
+                "source_id": self.source_id,
+                "file_path": str(self.path),
+                "file_name": self.file_name,
+                "x_column": self.x_column,
+                "y_columns": list(self.numeric_cols),
+                "tick": self.tick,
+                "file_offset": self.file_offset,
+                "sparklines": {
+                    col: list(self.sparklines.get(col, ())) for col in self.numeric_cols
+                },
+            }
 
     def emit(self) -> None:
         with self.lock:
@@ -88,6 +144,18 @@ class DiskReplaySource:
                 except (TypeError, ValueError):
                     continue
             self.tick += 1
+            self.file_offset = self._tell()
+
+    def drop_columns(self, columns: list[str]) -> None:
+        drop = {col for col in columns if col}
+        if not drop:
+            return
+        with self.lock:
+            self.numeric_cols = [col for col in self.numeric_cols if col not in drop]
+            index = {name: i for i, name in enumerate(self._header)}
+            self._numeric_idx = [index[col] for col in self.numeric_cols if col in index]
+            for col in drop:
+                self.sparklines.pop(col, None)
 
     def cards(self) -> list[tuple[str, list[float], str, str]]:
         with self.lock:

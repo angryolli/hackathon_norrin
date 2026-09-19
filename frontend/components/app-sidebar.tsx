@@ -9,12 +9,15 @@ import {
   Gauge,
   MessageSquare,
   PanelLeft,
+  Pause,
+  Play,
   Settings,
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { browserGet, type DataSource, type RuntimeConfig } from "@/lib/browser-api";
+import { useSimulation } from "@/components/simulation-context";
 
 const NAV = [
   { href: "/", label: "System Monitor", icon: Gauge },
@@ -29,6 +32,7 @@ export function AppSidebar() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [cfg, setCfg] = useState<RuntimeConfig | null>(null);
   const [sources, setSources] = useState<DataSource[]>([]);
+  const { playing, togglePlay } = useSimulation();
 
   useEffect(() => {
     setMounted(true);
@@ -126,6 +130,20 @@ export function AppSidebar() {
             aria-label={folded ? "Expand sidebar" : "Collapse sidebar"}
           >
             {folded ? <PanelLeft /> : <ChevronsLeft />}
+          </Button>
+        </div>
+
+        <div className={cn("px-2 pb-2", folded && "px-1")}>
+          <Button
+            size={folded ? "icon-sm" : "sm"}
+            variant={playing ? "secondary" : "default"}
+            className={cn("w-full", !folded && "justify-start gap-2")}
+            onClick={() => void togglePlay().catch(() => undefined)}
+            aria-label={playing ? "Pause" : "Play"}
+            title={playing ? "Pause" : "Play"}
+          >
+            {playing ? <Pause /> : <Play />}
+            <span className={cn(folded && "hidden")}>{playing ? "Pause" : "Play"}</span>
           </Button>
         </div>
 

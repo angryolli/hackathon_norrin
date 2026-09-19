@@ -61,3 +61,27 @@ class DataSourceRecord(SQLModel, table=True):
     y_columns: str = "[]"
     created_at: str
     updated_at: str
+
+
+class SimulationStateRecord(SQLModel, table=True):
+    __tablename__ = "simulation_state"
+
+    id: str = Field(primary_key=True, default="current")
+    playing: bool = False
+    tick: int = 0
+    t2_history: str = "[]"
+    updated_at: str = ""
+
+
+class SimulationSourceHistoryRecord(SQLModel, table=True):
+    __tablename__ = "simulation_source_history"
+
+    source_id: str = Field(primary_key=True)
+    file_path: str = ""
+    file_name: str = ""
+    x_column: str = ""
+    y_columns: str = "[]"
+    tick: int = 0
+    file_offset: int = 0
+    sparklines: str = "{}"
+    updated_at: str = ""
