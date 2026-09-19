@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { AuditView } from "@/components/audit-view";
-import { browserGet, browserPost } from "@/lib/browser-api";
+import { browserPost, eventsStreamUrl } from "@/lib/browser-api";
 
 type EventRow = {
   event_id: string;
@@ -37,15 +37,53 @@ export function DiagnosisView() {
   const [critique, setCritique] = useState<Record<string, string>>({});
   const [note, setNote] = useState("");
 
-  async function refresh() {
-    const data = await browserGet<{ events: EventRow[] }>("/events");
-    setEvents(data.events ?? []);
-  }
-
   useEffect(() => {
-    void refresh();
-    const id = setInterval(() => void refresh(), 2000);
-    return () => clearInterval(id);
+    let on = true;
+    let source: EventSource | null = null;
+    const sig = { current: "" };
+
+    function apply(data: { events?: EventRow[] }) {
+      if (!on) return;
+      const next = data.events ?? [];
+      const nextSig = next
+        .map(
+          (ev) =>
+            `${ev.event_id}:${ev.flagged ? 1 : 0}:${ev.confirmed ? 1 : 0}:${ev.override ? 1 : 0}:${ev.t2}`,
+        )
+        .join("|");
+      if (nextSig === sig.current) return;
+      sig.current = nextSig;
+      setEvents(next);
+    }
+
+    function connect() {
+      source?.close();
+      source = new EventSource(eventsStreamUrl());
+      source.addEventListener("events", (event) => {
+        try {
+          apply(JSON.parse((event as MessageEvent<string>).data) as { events?: EventRow[] });
+        } catch {
+          /* ignore malformed frames */
+        }
+      });
+    }
+
+    function onVis() {
+      if (document.hidden) {
+        source?.close();
+        source = null;
+        return;
+      }
+      connect();
+    }
+
+    connect();
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      on = false;
+      document.removeEventListener("visibilitychange", onVis);
+      source?.close();
+    };
   }, []);
 
   async function narrate(eventId: string, asCritique = false) {
@@ -65,7 +103,6 @@ export function DiagnosisView() {
       payload: { event_id: eventId, accepted: true },
       evidence_ref: eventId,
     });
-    await refresh();
   }
 
   async function override(eventId: string) {
@@ -79,7 +116,6 @@ export function DiagnosisView() {
       human_overridden: true,
     });
     setNote("");
-    await refresh();
   }
 
   return (

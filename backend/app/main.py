@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -41,6 +43,19 @@ from app.models.schemas import (
 from app.state import STATE
 
 
+def _wake(queues: set[asyncio.Queue]) -> None:
+    for queue in list(queues):
+        if queue.full():
+            try:
+                queue.get_nowait()
+            except asyncio.QueueEmpty:
+                pass
+        try:
+            queue.put_nowait(None)
+        except asyncio.QueueFull:
+            pass
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     STATE.boot()
@@ -48,16 +63,8 @@ async def lifespan(_app: FastAPI):
     try:
         yield
     finally:
-        for queue in list(_subscribers):
-            if queue.full():
-                try:
-                    queue.get_nowait()
-                except asyncio.QueueEmpty:
-                    pass
-            try:
-                queue.put_nowait(None)
-            except asyncio.QueueFull:
-                pass
+        _wake(_snapshot_subs)
+        _wake(_event_subs)
         task.cancel()
         try:
             await task
@@ -65,28 +72,49 @@ async def lifespan(_app: FastAPI):
             pass
 
 
-_subscribers: set[asyncio.Queue[MonitorSnapshot | None]] = set()
+_snapshot_subs: set[asyncio.Queue[MonitorSnapshot | None]] = set()
+_event_subs: set[asyncio.Queue[dict | None]] = set()
+_events_key: tuple | None = None
+
+
+def _push(queue: asyncio.Queue, item: Any) -> None:
+    if queue.full():
+        try:
+            queue.get_nowait()
+        except asyncio.QueueEmpty:
+            pass
+    try:
+        queue.put_nowait(item)
+    except asyncio.QueueFull:
+        pass
 
 
 async def _stream() -> None:
+    global _events_key
     while True:
         STATE.tick_live()
         snap = STATE.monitor()
-        for queue in list(_subscribers):
-            if queue.full():
-                try:
-                    queue.get_nowait()
-                except asyncio.QueueEmpty:
-                    pass
-            try:
-                queue.put_nowait(snap)
-            except asyncio.QueueFull:
-                pass
+        for queue in list(_snapshot_subs):
+            _push(queue, snap)
+        key = STATE.events_key()
+        if key != _events_key:
+            _events_key = key
+            payload = STATE.events_snapshot()
+            for queue in list(_event_subs):
+                _push(queue, payload)
         await asyncio.sleep(TICK_SECONDS)
 
 
+def _sse(event: str, data: str) -> str:
+    return f"event: {event}\ndata: {data}\n\n"
+
+
 def _sse_snapshot(snap: MonitorSnapshot) -> str:
-    return f"event: snapshot\ndata: {snap.model_dump_json()}\n\n"
+    return _sse("snapshot", snap.model_dump_json())
+
+
+def _sse_events(payload: dict) -> str:
+    return _sse("events", json.dumps(payload))
 
 
 class _SkipStreamGZip:
@@ -97,7 +125,8 @@ class _SkipStreamGZip:
         self.gzip = GZipMiddleware(app, minimum_size=minimum_size)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] == "http" and scope.get("path") == "/monitor/stream":
+        path = str(scope.get("path") or "")
+        if scope["type"] == "http" and path.endswith("/stream"):
             await self.app(scope, receive, send)
             return
         await self.gzip(scope, receive, send)
@@ -254,19 +283,36 @@ def ranking(event_id: str) -> RankingArtifact:
 
 @app.get("/events")
 def events() -> dict:
-    items = []
-    for ev in reversed(list(STATE.events.values())):
-        items.append(
-            {
-                **ev.model_dump(),
-                "confirmed": ev.event_id in STATE.confirmed,
-                "override": STATE.overrides.get(ev.event_id),
-                "ranking": STATE.rankings[ev.event_id].model_dump()
-                if ev.event_id in STATE.rankings
-                else None,
-            }
-        )
-    return {"events": items[:20], "evidence": "flagged T2 events vs frozen baseline"}
+    return STATE.events_snapshot()
+
+
+@app.get("/events/stream")
+async def events_stream() -> StreamingResponse:
+    async def frames():
+        queue: asyncio.Queue[dict | None] = asyncio.Queue(maxsize=1)
+        _event_subs.add(queue)
+        try:
+            yield _sse_events(STATE.events_snapshot())
+            while True:
+                try:
+                    payload = await asyncio.wait_for(queue.get(), timeout=1.0)
+                except asyncio.TimeoutError:
+                    continue
+                if payload is None:
+                    break
+                yield _sse_events(payload)
+        finally:
+            _event_subs.discard(queue)
+
+    return StreamingResponse(
+        frames(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.get("/monitor/snapshot", response_model=MonitorSnapshot)
@@ -278,7 +324,7 @@ def monitor() -> MonitorSnapshot:
 async def monitor_stream() -> StreamingResponse:
     async def events():
         queue: asyncio.Queue[MonitorSnapshot | None] = asyncio.Queue(maxsize=1)
-        _subscribers.add(queue)
+        _snapshot_subs.add(queue)
         try:
             yield _sse_snapshot(STATE.monitor())
             while True:
@@ -290,7 +336,7 @@ async def monitor_stream() -> StreamingResponse:
                     break
                 yield _sse_snapshot(snap)
         finally:
-            _subscribers.discard(queue)
+            _snapshot_subs.discard(queue)
 
     return StreamingResponse(
         events(),

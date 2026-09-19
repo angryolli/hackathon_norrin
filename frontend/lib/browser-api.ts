@@ -4,6 +4,10 @@ export function monitorStreamUrl(): string {
   return `${BASE}/monitor/stream`;
 }
 
+export function eventsStreamUrl(): string {
+  return `${BASE}/events/stream`;
+}
+
 export async function browserGet<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`, { cache: "no-store" });
   if (!res.ok) throw new Error(`${path} ${res.status}`);

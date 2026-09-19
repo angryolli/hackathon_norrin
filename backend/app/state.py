@@ -503,6 +503,32 @@ class AppState:
             self.store.put("rule", result.rule_id, rule.model_dump())
         return result
 
+    def events_snapshot(self) -> dict:
+        items = []
+        for ev in reversed(list(self.events.values())):
+            items.append(
+                {
+                    **ev.model_dump(),
+                    "confirmed": ev.event_id in self.confirmed,
+                    "override": self.overrides.get(ev.event_id),
+                    "ranking": self.rankings[ev.event_id].model_dump()
+                    if ev.event_id in self.rankings
+                    else None,
+                }
+            )
+        return {
+            "events": items[:20],
+            "evidence": "flagged T2 events vs frozen baseline",
+        }
+
+    def events_key(self) -> tuple:
+        return (
+            tuple(self.events),
+            frozenset(self.confirmed),
+            tuple(sorted(self.overrides)),
+            self.drift.latest_event_id if self.drift else None,
+        )
+
     def ranking(self, event_id: str) -> RankingArtifact:
         if event_id not in self.rankings:
             raise KeyError(event_id)
