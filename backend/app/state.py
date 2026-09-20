@@ -226,6 +226,23 @@ class AppState:
         self.last_signal_id = None
         self.signal_count = 0
 
+    def _reset_detectors(self, *, clear_signals: bool = True) -> None:
+        """Drop plant calibration when the source set changes.
+
+        v5 burn-in (mu/sig) is plant-wide. Keeping it after a CSV swap makes the
+        new file look absurdly hot from tick 0 (moment z in the thousands).
+        """
+        self.engine.reset()
+        if clear_signals:
+            self.store.clear_diagnosis()
+            self.last_signal_id = None
+            self.signal_count = 0
+        else:
+            self.signal_count = len(self.store.list_diagnosis(40))
+            if self.signal_count == 0:
+                self.last_signal_id = None
+        self._monitor_key = None
+
     def set_playing(self, playing: bool) -> MonitorSnapshot:
         if playing:
             if not self.replays:
@@ -373,6 +390,7 @@ class AppState:
         )
         if self.playing or self.replays:
             self._attach_replay(row)
+        self._reset_detectors(clear_signals=True)
         self._persist_simulation()
         return self._as_data_source(row)
 
@@ -400,6 +418,7 @@ class AppState:
         )
         if self.playing or self.replays:
             self._attach_replay(row)
+        self._reset_detectors(clear_signals=True)
         self._persist_simulation()
         return self._as_data_source(row)
 
@@ -416,6 +435,13 @@ class AppState:
         row = self.store.update_data_source(source_id, payload)
         if row is None:
             raise KeyError(source_id)
+        # Column / path edits change what feeds the plant detectors.
+        if any(key in payload for key in ("y_columns", "x_column", "file_path", "live_path")):
+            self._reset_detectors(clear_signals=True)
+            self.replays = [r for r in self.replays if r.source_id != source_id]
+            if self.playing or self.replays:
+                self._attach_replay(row)
+        self._persist_simulation()
         return self._as_data_source(row)
 
     def remove_data_source(self, source_id: str) -> None:
@@ -446,7 +472,7 @@ class AppState:
             for replay in self.replays:
                 if replay.source_id == source_id:
                     replay.drop_columns(list(fields))
-        self._monitor_key = None
+        self._reset_detectors(clear_signals=True)
         self._persist_simulation()
 
     def remove_data_sources(self, source_ids: list[str]) -> None:
@@ -473,10 +499,10 @@ class AppState:
             if not self.store.delete_data_source(source_id):
                 raise KeyError(source_id)
         self.store.clear_diagnosis_for_sources(drop)
+        self._reset_detectors(clear_signals=False)
         ids = self._source_ids()
         if self.dataset_id in drop:
             self.dataset_id = ids[0] if ids else ""
-        self._monitor_key = None
         self._persist_simulation()
         self.signal_count = len(self.store.list_diagnosis(40))
         if self.signal_count == 0:
@@ -548,6 +574,8 @@ class AppState:
                     "z": signal.z,
                     "top_fields": signal.top_fields,
                     "evidence": signal.evidence,
+                    "reason": signal.reason,
+                    "origins": signal.origins,
                 }
             )
             self.last_signal_id = str(row.get("id") or "")

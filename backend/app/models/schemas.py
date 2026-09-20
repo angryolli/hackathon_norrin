@@ -308,6 +308,8 @@ class DiagnosisSignal(BaseModel):
     z: float = 0.0
     top_fields: list[DiagnosisContributor] = Field(default_factory=list)
     evidence: str = ""
+    reason: str = ""
+    origins: list[str] = Field(default_factory=list)
     created_at: str = ""
 
 

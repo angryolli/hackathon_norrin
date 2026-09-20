@@ -99,6 +99,8 @@ class SimulationRunAlarmRecord(SQLModel, table=True):
     z: float = 0.0
     top_fields: str = "[]"
     evidence: str = ""
+    reason: str = ""
+    origins: str = "[]"
     created_at: str = ""
 
 
@@ -139,4 +141,6 @@ class DiagnosisSignalRecord(SQLModel, table=True):
     z: float = 0.0
     top_fields: str = "[]"
     evidence: str = ""
+    reason: str = ""
+    origins: str = "[]"
     created_at: str = ""

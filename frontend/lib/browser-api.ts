@@ -154,6 +154,8 @@ export type SimulationRunDetail = SimulationRunSummary & {
     z: number;
     top_fields: Array<Record<string, unknown>>;
     evidence: string;
+    reason?: string;
+    origins?: string[];
     created_at: string;
   }>;
   decisions: Array<{

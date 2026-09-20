@@ -56,6 +56,10 @@ export type DiagnosisSignal = {
   z: number;
   top_fields: DiagnosisContributor[];
   evidence: string;
+  /** Human label: "z-score k=6", "v5 agnostic (moment)", or both joined with " + ". */
+  reason?: string;
+  /** Machine tags: "zscore", "moment", "freeze", "amp", "v5". */
+  origins?: string[];
   created_at: string;
 };
 

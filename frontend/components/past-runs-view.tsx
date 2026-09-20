@@ -96,6 +96,7 @@ export function PastRunsView() {
                     <li key={`${row.id}-${row.tick}`} className="rounded-md border border-border p-3">
                       <p>
                         {row.id} · {row.level} · tick {row.tick} · z {row.z.toFixed(2)}
+                        {row.reason ? ` · ${row.reason}` : ""}
                       </p>
                       <p className="text-muted-foreground">{row.evidence}</p>
                     </li>

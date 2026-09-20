@@ -237,7 +237,10 @@ class V5AgnosticDetector:
         moment_z = NAN
         raw_mom = 0
         mom_level = 0
-        if self.calibrated and math.isfinite(plant_score):
+        # Notebook zeros z[:BURNIN] and only loops t in [BURNIN, T). Do not
+        # alarm on the finalize tick itself either — calibration uses samples
+        # 0..BURNIN-1 as the quiet baseline.
+        if self.calibrated and t >= BURNIN and math.isfinite(plant_score):
             moment_z = (plant_score - self.score_mu) / self.score_sig
             if moment_z >= r_z:
                 raw_mom = 2

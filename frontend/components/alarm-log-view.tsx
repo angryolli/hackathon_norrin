@@ -42,6 +42,7 @@ export function AlarmLogView({ runId }: { runId?: string }) {
           <p>
             {row.id} · {row.level} · tick {row.tick} · score {row.score.toFixed(2)} · z{" "}
             {row.z.toFixed(2)}
+            {row.reason ? ` · ${row.reason}` : ""}
           </p>
           <p className="text-muted-foreground">{row.evidence}</p>
           {row.top_fields?.length > 0 && (

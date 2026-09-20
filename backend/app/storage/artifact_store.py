@@ -46,6 +46,8 @@ class ArtifactStore:
         self._migrate_data_sources()
         self._migrate_simulation_history()
         self._migrate_simulation_state()
+        self._migrate_diagnosis_signals()
+        self._migrate_run_alarms()
 
     def _session(self) -> Session:
         return Session(self._engine, expire_on_commit=False)
@@ -86,6 +88,38 @@ class ArtifactStore:
             if names and "run_started_at" not in names:
                 conn.execute(
                     text("ALTER TABLE simulation_state ADD COLUMN run_started_at TEXT DEFAULT ''")
+                )
+            conn.commit()
+
+    def _migrate_diagnosis_signals(self) -> None:
+        with self._engine.connect() as conn:
+            rows = conn.execute(text("PRAGMA table_info(diagnosis_signals)")).fetchall()
+            names = {row[1] for row in rows}
+            if not names:
+                return
+            if "reason" not in names:
+                conn.execute(
+                    text("ALTER TABLE diagnosis_signals ADD COLUMN reason TEXT DEFAULT ''")
+                )
+            if "origins" not in names:
+                conn.execute(
+                    text("ALTER TABLE diagnosis_signals ADD COLUMN origins TEXT DEFAULT '[]'")
+                )
+            conn.commit()
+
+    def _migrate_run_alarms(self) -> None:
+        with self._engine.connect() as conn:
+            rows = conn.execute(text("PRAGMA table_info(simulation_run_alarms)")).fetchall()
+            names = {row[1] for row in rows}
+            if not names:
+                return
+            if "reason" not in names:
+                conn.execute(
+                    text("ALTER TABLE simulation_run_alarms ADD COLUMN reason TEXT DEFAULT ''")
+                )
+            if "origins" not in names:
+                conn.execute(
+                    text("ALTER TABLE simulation_run_alarms ADD COLUMN origins TEXT DEFAULT '[]'")
                 )
             conn.commit()
 
@@ -584,6 +618,8 @@ class ArtifactStore:
             z=float(body.get("z") or 0),
             top_fields=json.dumps(body.get("top_fields") or []),
             evidence=str(body.get("evidence") or ""),
+            reason=str(body.get("reason") or ""),
+            origins=json.dumps(body.get("origins") or []),
             created_at=now,
         )
         with self._lock, self._session() as session:
@@ -678,6 +714,8 @@ class ArtifactStore:
                         z=float(row.z or 0),
                         top_fields=row.top_fields or "[]",
                         evidence=str(row.evidence or ""),
+                        reason=str(getattr(row, "reason", None) or ""),
+                        origins=str(getattr(row, "origins", None) or "[]"),
                         created_at=str(row.created_at or now),
                     )
                 )
@@ -752,6 +790,15 @@ class ArtifactStore:
             top_fields = []
         if not isinstance(top_fields, list):
             top_fields = []
+        try:
+            origins = json.loads(getattr(row, "origins", None) or "[]")
+        except (TypeError, ValueError):
+            origins = []
+        if not isinstance(origins, list):
+            origins = []
+        reason = str(getattr(row, "reason", None) or "")
+        if not reason:
+            reason = _reason_from_evidence(str(row.evidence or ""))
         return {
             "id": row.signal_id,
             "tick": int(row.tick or 0),
@@ -760,6 +807,8 @@ class ArtifactStore:
             "z": float(row.z or 0),
             "top_fields": top_fields,
             "evidence": row.evidence,
+            "reason": reason,
+            "origins": [str(item) for item in origins],
             "created_at": row.created_at,
         }
 
@@ -785,6 +834,15 @@ class ArtifactStore:
             top_fields = []
         if not isinstance(top_fields, list):
             top_fields = []
+        try:
+            origins = json.loads(getattr(row, "origins", None) or "[]")
+        except (TypeError, ValueError):
+            origins = []
+        if not isinstance(origins, list):
+            origins = []
+        reason = str(getattr(row, "reason", None) or "")
+        if not reason:
+            reason = _reason_from_evidence(str(row.evidence or ""))
         return {
             "id": row.id,
             "tick": int(row.tick or 0),
@@ -793,5 +851,24 @@ class ArtifactStore:
             "z": float(row.z or 0),
             "top_fields": top_fields,
             "evidence": row.evidence,
+            "reason": reason,
+            "origins": [str(item) for item in origins],
             "created_at": row.created_at,
         }
+
+
+def _reason_from_evidence(evidence: str) -> str:
+    """Best-effort label for alarms stored before the reason column existed."""
+    text = evidence.lower()
+    labels: list[str] = []
+    if "zscore" in text or "z-score" in text or "k=6" in text:
+        labels.append("z-score k=6")
+    if "moment" in text:
+        labels.append("v5 agnostic (moment)")
+    elif "freeze" in text:
+        labels.append("v5 agnostic (freeze)")
+    elif "amp" in text:
+        labels.append("v5 agnostic (amp)")
+    elif "v5" in text:
+        labels.append("v5 agnostic")
+    return " + ".join(labels)

@@ -36,6 +36,10 @@ class DiagnosisSignal:
     z: float
     top_fields: list[dict]
     evidence: str
+    """Human-readable detector origin, e.g. `z-score k=6` or `v5 agnostic (moment)`."""
+    reason: str = ""
+    """Machine tags that produced the plant level, e.g. `zscore`, `moment`."""
+    origins: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -168,39 +172,49 @@ class StatisticalEngine:
         label = LEVEL_NAMES[combined]
         top_fields = self._top_fields(z_verdict, v5_verdict, combined)
         names = ", ".join(row["field_id"] for row in top_fields[:3]) or "none"
-        model_txt = "+".join(models) if models else "unknown"
+        reason, origins = self._reason_label(models, v5_verdict)
 
         parts: list[str] = []
-        if "zscore" in models:
+        if "zscore" in origins:
             gate = self.zscore.red_z if z_verdict.level == 2 else self.zscore.yellow_z
             streak = z_verdict.streak_red if z_verdict.level == 2 else z_verdict.streak_yellow
             parts.append(
                 f"zscore k={self.zscore.k} streak={streak} |z|>={gate:g} "
                 f"(max|z|={z_verdict.z_max:.2f})"
             )
-        if any(m != "zscore" for m in models):
-            reason = v5_verdict.reason or "v5"
-            if reason == "moment":
+        if any(o != "zscore" for o in origins):
+            v5_name = v5_verdict.reason or "v5"
+            if v5_name == "moment":
                 parts.append(f"v5 moment z={v5_verdict.moment_z:.2f}")
-            elif reason == "freeze":
+            elif v5_name == "freeze":
                 parts.append(f"v5 freeze extra={v5_verdict.freeze_extra:.0f}")
-            elif reason == "amp":
+            elif v5_name == "amp":
                 parts.append(f"v5 amp q90={v5_verdict.amp_q90:.2f}")
             else:
-                parts.append(f"v5 {reason}")
+                parts.append(f"v5 {v5_name}")
 
         evidence = (
-            f"{label} at tick {tick} via {model_txt}: " + "; ".join(parts) + f"; top {names}"
+            f"{label} at tick {tick} via {reason}: " + "; ".join(parts) + f"; top {names}"
         )
         score = float(
-            z_verdict.streak_yellow
-            if "zscore" in models
+            (
+                z_verdict.streak_red
+                if z_verdict.level == 2
+                else z_verdict.streak_yellow
+            )
+            if "zscore" in origins
             else max(v5_verdict.moment_z, v5_verdict.freeze_extra, v5_verdict.amp_q90)
         )
         z_val = (
             _finite_or_zero(z_verdict.z_max)
-            if "zscore" in models
-            else _finite_or_zero(v5_verdict.moment_z)
+            if "zscore" in origins
+            else _finite_or_zero(
+                v5_verdict.moment_z
+                if (v5_verdict.reason or "") == "moment"
+                else v5_verdict.amp_q90
+                if (v5_verdict.reason or "") == "amp"
+                else v5_verdict.freeze_extra
+            )
         )
         return DiagnosisSignal(
             tick=tick,
@@ -209,7 +223,32 @@ class StatisticalEngine:
             z=round(z_val, 3),
             top_fields=top_fields,
             evidence=evidence,
+            reason=reason,
+            origins=origins,
         )
+
+    def _reason_label(
+        self,
+        models: list[str],
+        v5_verdict: V5TickVerdict,
+    ) -> tuple[str, list[str]]:
+        origins: list[str] = []
+        labels: list[str] = []
+        if "zscore" in models:
+            origins.append("zscore")
+            labels.append(f"z-score k={self.zscore.k}")
+        v5_parts = [m for m in models if m != "zscore"]
+        if v5_parts:
+            channel = v5_verdict.reason if v5_verdict.reason in {"moment", "freeze", "amp"} else (
+                v5_parts[0] if v5_parts[0] in {"moment", "freeze", "amp"} else "v5"
+            )
+            origins.append(channel if channel != "v5" else "v5")
+            labels.append(
+                f"v5 agnostic ({channel})" if channel != "v5" else "v5 agnostic"
+            )
+        if not labels:
+            return "unknown", []
+        return " + ".join(labels), origins
 
     def _top_fields(
         self,

@@ -29,6 +29,34 @@ export function fmt(value: number | null | undefined) {
   return value.toFixed(3);
 }
 
+/** Metric chips for an alarm — avoid showing z-score `score/k` on v5-only rows. */
+export function alarmMetricLabels(row: DiagnosisSignal, k: number): string[] {
+  const origins = row.origins ?? [];
+  const reason = (row.reason ?? "").toLowerCase();
+  const hasZ =
+    origins.includes("zscore") || reason.includes("z-score") || reason.includes("zscore");
+  const hasV5 =
+    origins.some((o) => o !== "zscore") || reason.includes("v5") || reason.includes("moment")
+    || reason.includes("freeze") || reason.includes("amp");
+
+  if (hasZ && !hasV5) {
+    return [`|z| ${fmt(row.z)}`, `score ${fmt(row.score)}/${k}`];
+  }
+  if (!hasZ && hasV5) {
+    if (reason.includes("freeze") || origins.includes("freeze")) {
+      return [`freeze +${fmt(row.score)}`];
+    }
+    if (reason.includes("amp") || origins.includes("amp")) {
+      return [`amp q90 ${fmt(row.score)}`];
+    }
+    return [`moment z ${fmt(row.z)}`];
+  }
+  if (hasZ && hasV5) {
+    return [`|z| ${fmt(row.z)}`, `score ${fmt(row.score)}/${k}`];
+  }
+  return [`|z| ${fmt(row.z)}`, `score ${fmt(row.score)}/${k}`];
+}
+
 export type SystemReport = {
   text: string;
   generatedAt: string;
@@ -253,10 +281,10 @@ export function DriftPane({
           <h2 className="text-sm font-medium">Alarms</h2>
           <p className="mt-1 text-sm text-muted-foreground">
             Two detectors share this log. Rolling z-score: yellow after {k} consecutive samples past{" "}
-            {fmt(zYellow)}σ, red past {fmt(zRed)}σ. v5 agnostic: expanding-moment RMS, freeze streaks,
-            and amplitude envelope (gates ease after burn-in). Plant level is the max of both — either
-            can open an alarm. Score is the z-score streak when that model fires; |z| is the peak
-            deviation on the opening tick.
+            {fmt(zYellow)}σ, red past {fmt(zRed)}σ — brief spikes do not open one. v5 agnostic:
+            expanding-moment RMS, freeze streaks, and amplitude envelope (gates ease after burn-in).
+            Plant level is the max of both — either can open an alarm. Score/k is the z-score streak
+            when that model fires; v5-only rows show moment/freeze/amp instead.
           </p>
         </div>
       )}
@@ -285,6 +313,7 @@ export function DriftPane({
               const expanded = open === row.id;
               const diagnosis = alarmDiagnoses[row.id] ?? null;
               const rootCauseBusy = rootCauseSignalId === row.id;
+              const metrics = alarmMetricLabels(row, k);
               return (
                 <li key={row.id} className="px-4 py-4">
                   <div className="flex flex-wrap items-start justify-between gap-3">
@@ -298,10 +327,16 @@ export function DriftPane({
                           {row.level.toUpperCase()}
                         </span>
                         <span className="text-muted-foreground">tick {row.tick}</span>
-                        <span className="text-muted-foreground">|z| {fmt(row.z)}</span>
-                        <span className="text-muted-foreground">
-                          score {fmt(row.score)}/{k}
-                        </span>
+                        {metrics.map((label) => (
+                          <span key={label} className="text-muted-foreground">
+                            {label}
+                          </span>
+                        ))}
+                        {row.reason ? (
+                          <span className="rounded border border-border px-1.5 py-0.5 text-foreground">
+                            {row.reason}
+                          </span>
+                        ) : null}
                       </div>
                       <p className="text-sm text-muted-foreground">
                         {field ? (
@@ -365,6 +400,12 @@ export function DriftPane({
                   )}
                   {expanded && (
                     <div className="mt-3 space-y-3 border-t border-border pt-3">
+                      {row.reason ? (
+                        <p className="text-xs text-muted-foreground">
+                          Reason:{" "}
+                          <span className="font-mono text-foreground">{row.reason}</span>
+                        </p>
+                      ) : null}
                       <p className="font-mono text-[11px] text-muted-foreground">{row.evidence}</p>
                       {row.top_fields.length > 0 && (
                         <ol className="list-decimal space-y-1 pl-4 font-mono text-xs">
