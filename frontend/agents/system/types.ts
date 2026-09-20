@@ -15,13 +15,14 @@ export type SystemReport = {
 
 export type FieldUnderstanding = {
   field_id: string;
-  role: string;
-  hypothesis: string;
-  evidence: string;
+  /** Plain-language best guess of what this channel measures or drives. */
+  guess: string;
+  /** 0–1 confidence in the guess. */
   confidence: number;
-  inferred: string;
-  assumed: string;
-  uncertain: string;
+  /** Short read on current stream behavior, citing moments and |z| when available. */
+  observations: string;
+  /** measured | actuator | ambiguous — optional hint alongside the guess. */
+  role?: string;
 };
 
 export type FieldQuality = {

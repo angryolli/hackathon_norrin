@@ -251,7 +251,7 @@ export function DashboardView() {
 
           <DashboardSection
             title="Sensor understanding"
-            subtitle="Inferred identity and role for each channel. Full field records are in Reports & Logs."
+            subtitle="Best guess of what each channel measures, how confident that guess is, and a quick read on the live stream."
           >
             <SensorIntelGrid fields={fields} sensors={systemAgent.sensors} mode="understanding" />
           </DashboardSection>

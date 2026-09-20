@@ -48,15 +48,22 @@ export function parseUnderstandingFields(text: string) {
     const item = row as Record<string, unknown>;
     const field_id = asString(item.field_id);
     if (!field_id) continue;
+    const guess =
+      asString(item.guess) ||
+      asString(item.hypothesis) ||
+      asString(item.inferred);
+    const observations =
+      asString(item.observations) ||
+      asString(item.evidence) ||
+      [asString(item.inferred), asString(item.assumed), asString(item.uncertain)]
+        .filter(Boolean)
+        .join(" ");
     out[field_id] = {
       field_id,
-      role: asString(item.role) || "ambiguous",
-      hypothesis: asString(item.hypothesis),
-      evidence: asString(item.evidence),
+      guess,
       confidence: asNumber(item.confidence),
-      inferred: asString(item.inferred),
-      assumed: asString(item.assumed),
-      uncertain: asString(item.uncertain),
+      observations,
+      role: asString(item.role) || undefined,
     };
   }
   return out;

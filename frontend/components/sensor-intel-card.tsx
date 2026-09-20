@@ -19,6 +19,45 @@ function adjectiveIndex(value: string) {
   return i >= 0 ? i : 2;
 }
 
+function confidenceTone(confidence: number) {
+  if (confidence >= 0.7) return "text-emerald-400";
+  if (confidence >= 0.45) return "text-amber-300";
+  return "text-orange-300";
+}
+
+function ConfidenceBar({ value }: { value: number }) {
+  return (
+    <div className="flex gap-1">
+      {[0, 1, 2, 3, 4].map((index) => {
+        const filled = value >= (index + 1) / 5;
+        return (
+          <span
+            key={index}
+            className={cn("h-1 flex-1 rounded-full", filled ? "bg-primary/80" : "bg-muted")}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+function QualityBar({ levelIndex }: { levelIndex: number }) {
+  return (
+    <div className="flex gap-1">
+      {SCALE.map((label, index) => (
+        <span
+          key={label}
+          title={label}
+          className={cn(
+            "h-1 flex-1 rounded-full",
+            index <= levelIndex ? SCALE_COLOR[label].bar : "bg-muted",
+          )}
+        />
+      ))}
+    </div>
+  );
+}
+
 export function noteForField(
   sensors: Record<string, SensorNote> | undefined,
   sourceId: string,
@@ -56,6 +95,7 @@ export function SensorIntelCard({
   const adj = quality?.adjective ?? "Fair";
   const adjI = adjectiveIndex(adj);
   const href = telemetryHref(`${sourceId}::${fieldId}`);
+  const guessConfidence = understanding?.confidence ?? 0;
 
   return (
     <article
@@ -90,45 +130,45 @@ export function SensorIntelCard({
       </div>
 
       {showUnderstanding && (
-        <section className="mt-3 space-y-1">
-          <h4 className="text-[10px] tracking-wide text-muted-foreground uppercase">
-            Understanding
-          </h4>
+        <section className="mt-3 space-y-2">
           {understanding ? (
-            <div className="space-y-1 text-sm">
-              <p>
-                <span className="text-muted-foreground">Role </span>
-                {understanding.role}
-                {understanding.hypothesis ? ` · ${understanding.hypothesis}` : ""}
+            <>
+              <div className="flex items-start justify-between gap-2">
+                <p className="text-[10px] tracking-wide text-muted-foreground uppercase">
+                  Likely sensor
+                </p>
+                <span
+                  className={cn(
+                    "shrink-0 font-mono text-[10px]",
+                    confidenceTone(guessConfidence),
+                  )}
+                >
+                  {(guessConfidence * 100).toFixed(0)}% confident
+                </span>
+              </div>
+              <p className="text-sm leading-snug text-foreground">
+                {understanding.guess || "No guess yet."}
               </p>
-              {understanding.evidence && (
-                <p className="font-mono text-xs text-muted-foreground">{understanding.evidence}</p>
-              )}
-              <p className="font-mono text-[11px] text-muted-foreground">
-                confidence {(understanding.confidence * 100).toFixed(0)}%
-              </p>
-              {understanding.inferred && (
-                <p>
-                  <span className="text-muted-foreground">Inferred </span>
-                  {understanding.inferred}
+              {understanding.role && (
+                <p className="text-[11px] text-muted-foreground capitalize">
+                  {understanding.role}
                 </p>
               )}
-              {understanding.assumed && (
-                <p>
-                  <span className="text-muted-foreground">Assumed </span>
-                  {understanding.assumed}
-                </p>
+              <ConfidenceBar value={guessConfidence} />
+              {understanding.observations && (
+                <div className="rounded-md border border-border/60 bg-muted/20 px-2.5 py-2">
+                  <p className="text-[10px] tracking-wide text-muted-foreground uppercase">
+                    Right now
+                  </p>
+                  <p className="mt-1 text-sm leading-snug text-muted-foreground">
+                    {understanding.observations}
+                  </p>
+                </div>
               )}
-              {understanding.uncertain && (
-                <p>
-                  <span className="text-muted-foreground">Uncertain </span>
-                  {understanding.uncertain}
-                </p>
-              )}
-            </div>
+            </>
           ) : (
             <p className="text-sm text-muted-foreground">
-              Launch the system agent to classify this source.
+              Launch the system agent to guess what this channel measures and summarize the stream.
             </p>
           )}
         </section>
@@ -150,18 +190,7 @@ export function SensorIntelCard({
                     {(quality.confidence * 100).toFixed(0)}%
                   </span>
                 </div>
-                <div className="mt-1 flex gap-1">
-                  {SCALE.map((label, index) => (
-                    <span
-                      key={label}
-                      title={label}
-                      className={cn(
-                        "h-1.5 flex-1 rounded-full",
-                        index <= adjI ? SCALE_COLOR[label].bar : SCALE_COLOR[label].dim,
-                      )}
-                    />
-                  ))}
-                </div>
+                <QualityBar levelIndex={adjI} />
               </div>
               {quality.summary && <p className="text-muted-foreground">{quality.summary}</p>}
             </div>

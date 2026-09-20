@@ -44,11 +44,18 @@ export function createUnderstandingAgent() {
     tools: {},
     instructions: `${SHARED}
 
-Write a JSON object only (no markdown) with this shape:
-{"fields":[{"field_id":"exact id from the artifact","role":"measured|actuator|ambiguous","hypothesis":"cautious functional guess","evidence":"n/mean/sd/skew/kurtosis/|z| cited","confidence":0.0,"inferred":"...","assumed":"...","uncertain":"..."}]}
-One object per field in the artifact. field_id MUST copy the artifact exactly.
-Lower-confidence with evidence beats a confident label with none.
-Domain knowledge is a hypothesis aid, not a predetermined answer.`,
+Task: for each unlabeled channel, tell an operator what the sensor LIKELY is and what the stream LOOKS LIKE right now.
+Column names are not ground truth — infer from statistical behavior and cautious process knowledge only.
+
+Write JSON only (no markdown):
+{"fields":[{"field_id":"exact id from the artifact","guess":"plain-language label, e.g. reactor outlet temperature or feed valve position","confidence":0.0,"observations":"1–2 short sentences on current data: cite n, mean, sd, skew, kurtosis, |z|/score if present; note stable/drift/noisy/frozen/alarm involvement","role":"measured|actuator|ambiguous"}]}
+
+Rules:
+- guess: one concise sentence — what this channel probably measures or drives. Say "unknown" only if moments give nothing.
+- confidence: 0–1 for the guess itself (not data quality). Lower when evidence is thin.
+- observations: factual snapshot of THIS run so far — not a repeat of the guess. Always cite numbers from the artifact.
+- role: optional hint; do not let it replace guess.
+- One object per field. field_id MUST copy the artifact exactly.`,
   });
 }
 
@@ -95,7 +102,7 @@ An operator clicked "Do root cause analysis" on ONE specific yellow or red alarm
 You receive a structured artifact with:
 - target_alarm: the alarm under investigation (id, tick, level, |z|, evidence, ranked contributing fields)
 - current_sample: live statistical fingerprints for every watched channel
-- agent_notes: prior understanding (role/hypothesis) and quality judgments per field from an earlier system pass
+- agent_notes: prior understanding (guess/observations) and quality judgments per field from an earlier system pass
 - run_context: how the z-score detector works
 - other_open_alarms: sibling alarms for context only
 

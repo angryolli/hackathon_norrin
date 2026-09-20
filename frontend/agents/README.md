@@ -19,7 +19,7 @@ Human **accept / question / override** lives on System Dashboard (Judgment). Que
 
 The autonomous reliability loop. One **Launch** run, in order, over derived fingerprints (never raw rows):
 
-1. **Understanding** — unlabeled field roles, inferred vs assumed vs uncertain, evidence, confidence
+1. **Understanding** — plain-language guess of what each channel is, confidence in that guess, and current stream observations
 2. **Quality** — completeness / validity / consistency / timeliness as far as the moment table supports; separate broken data from process drift
 
 Root cause is **on demand**: the operator clicks **Do root cause analysis** on a specific alarm card. The system agent then runs a separate prompt with full alarm context, prior understanding/quality notes, and channel fingerprints for that alarm only.

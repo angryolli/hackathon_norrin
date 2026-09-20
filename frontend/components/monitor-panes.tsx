@@ -101,13 +101,10 @@ export type DataFlowRecord = {
 export type SensorNote = {
   understanding?: {
     field_id: string;
-    role: string;
-    hypothesis: string;
-    evidence: string;
+    guess: string;
     confidence: number;
-    inferred: string;
-    assumed: string;
-    uncertain: string;
+    observations: string;
+    role?: string;
   };
   quality?: {
     field_id: string;

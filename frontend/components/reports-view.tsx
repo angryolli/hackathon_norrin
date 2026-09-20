@@ -45,7 +45,7 @@ export function ReportsView() {
           <div className="mx-auto max-w-3xl">
             <h2 className="mb-3 text-sm font-medium">Sensor understanding report</h2>
             <p className="mb-3 text-sm text-muted-foreground">
-              Inferred identity, role, evidence, and confidence for each channel in the current run.
+              Likely sensor label, confidence, and current observations for each channel in the run.
               Logged automatically when the system agent completes understanding.
             </p>
             <FieldReportsView key={`u-${resetRevision}`} mode="understanding" />
