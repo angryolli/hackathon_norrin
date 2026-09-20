@@ -10,7 +10,6 @@ type LogEntry = {
   payload: {
     step?: string;
     fields?: unknown[];
-    data_trusted?: boolean | null;
   };
 };
 
@@ -94,10 +93,7 @@ export function FieldReportsView({ mode }: { mode: "understanding" | "quality" }
     [agent.sensors, mode],
   );
   const fields = liveFields.length > 0 ? liveFields : logFields;
-  const payload =
-    mode === "quality"
-      ? { data_trusted: agent.dataTrusted, fields }
-      : { fields };
+  const payload = { fields };
 
   return (
     <div className="space-y-4">

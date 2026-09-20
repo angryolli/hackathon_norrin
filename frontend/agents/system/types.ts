@@ -56,11 +56,12 @@ export type SystemAgentStatus = {
   lastBeatAt: string | null;
   error: string | null;
   eventId: string | null;
-  dataTrusted: boolean | null;
   understanding: SystemReport | null;
   quality: SystemReport | null;
   diagnosis: SystemReport | null;
   critique: SystemReport | null;
+  alarmDiagnoses: Record<string, SystemReport>;
+  rootCauseSignalId: string | null;
   sensors: Record<string, SensorNote>;
   dataFlow: DataFlowRecord;
 };

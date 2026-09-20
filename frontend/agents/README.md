@@ -20,8 +20,9 @@ Human **accept / question / override** lives on System Dashboard (Judgment). Que
 The autonomous reliability loop. One **Launch** run, in order, over derived fingerprints (never raw rows):
 
 1. **Understanding** — unlabeled field roles, inferred vs assumed vs uncertain, evidence, confidence
-2. **Quality** — completeness / validity / consistency / timeliness as far as the moment table supports; separate broken data from process drift; `DATA_TRUSTED: yes|no`
-3. **Root cause** — fault type, ranked fields, operator-readable steps, then a critique of that diagnosis
+2. **Quality** — completeness / validity / consistency / timeliness as far as the moment table supports; separate broken data from process drift
+
+Root cause is **on demand**: the operator clicks **Do root cause analysis** on a specific alarm card. The system agent then runs a separate prompt with full alarm context, prior understanding/quality notes, and channel fingerprints for that alarm only.
 
 Drift yellow/red flags themselves come from the FastAPI expanding-moment engine, not the LLM. The system agent narrates and attributes them.
 
@@ -34,7 +35,7 @@ Demo scheduler: launch runs **one cycle** then stops (no token burn). Continuous
 | Sensor understanding | System agent | System Dashboard (top) + Reports & Logs |
 | Data quality checks | System agent | System Dashboard → Quality + Reports & Logs |
 | Drift / anomaly | Compute plane + system narration | System Dashboard → Alarms |
-| Root-cause diagnosis | System agent (+ critique) | System Dashboard → Alarms |
+| Root-cause diagnosis | System agent (on demand per alarm) | Alarm card → Do root cause analysis |
 | Understanding / quality fields | System agent → decision log | Reports & Logs (Understanding, Quality checks, Decision log) |
 | 6 Decision log | Both (model calls + overrides) | Reports & Logs → Current decision log; past runs after reset |
 | 7 Adaptability | Architecture (unlabeled columns, source `kind`) | Reports & Logs → Data flow |

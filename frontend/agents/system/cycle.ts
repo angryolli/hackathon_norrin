@@ -2,9 +2,7 @@ import { getDiagnosis, postDecisionLog } from "@/lib/pipeline";
 import { LLMProvider, getRuntime, openaiCompatBaseURL } from "@/lib/llm/provider";
 import { clipDiagnosis } from "./artifact";
 import {
-  createCritiqueAgent,
   createQualityAgent,
-  createRootCauseAgent,
   createUnderstandingAgent,
   payloadHash,
   runSystemPrompt,
@@ -17,11 +15,7 @@ export type CycleSink = {
   abortSignal: AbortSignal;
   setStep: (step: SystemStep) => void;
   setEventId: (id: string | null) => void;
-  setDataTrusted: (value: boolean | null) => void;
-  setReport: (
-    key: "understanding" | "quality" | "diagnosis" | "critique",
-    report: SystemReport,
-  ) => void;
+  setReport: (key: "understanding" | "quality", report: SystemReport) => void;
   mergeSensors: (patch: Record<string, SensorNote>) => void;
 };
 
@@ -61,14 +55,6 @@ function report(text: string, bytes: number): SystemReport {
     hash: payloadHash(text),
     bytes,
   };
-}
-
-function trustedFrom(text: string): boolean | null {
-  const line = text.split("\n").find((row) => /DATA_TRUSTED/i.test(row));
-  if (!line) return null;
-  if (/\bno\b/i.test(line)) return false;
-  if (/\byes\b/i.test(line)) return true;
-  return null;
 }
 
 export async function runSystemCycle(sink: CycleSink) {
@@ -122,58 +108,14 @@ export async function runSystemCycle(sink: CycleSink) {
     qualityPatch[id] = { quality: row };
   }
   sink.mergeSensors(qualityPatch);
-  const trusted =
-    parsedQuality.dataTrusted ?? trustedFrom(quality) ?? null;
-  sink.setDataTrusted(trusted);
   await postDecisionLog({
     type: "flag",
     payload: {
       step: "quality",
-      data_trusted: trusted,
       hash: payloadHash(quality),
       fields: Object.values(parsedQuality.fields),
     },
     evidence_ref: "system:quality",
   });
 
-  if (sink.aborted()) return;
-  if (trusted === false) {
-    const held =
-      "DATA_TRUSTED is no. Root-cause diagnosis is withheld until the incoming stream can be trusted. A broken sensor or gapped batch is not a process fault. See the Quality report.";
-    sink.setReport("diagnosis", report(held, bytes));
-    return;
-  }
-
-  if (sink.aborted()) return;
-  sink.setStep("diagnosis");
-  const diagnosis = await runSystemPrompt(
-    "diagnosis",
-    createRootCauseAgent(),
-    json,
-    bytes,
-    sink.abortSignal,
-  );
-  if (sink.aborted()) return;
-  sink.setReport("diagnosis", report(diagnosis, bytes));
-  await postDecisionLog({
-    type: "diagnosis",
-    payload: { event_id: latest?.id ?? null, hash: payloadHash(diagnosis) },
-    evidence_ref: latest?.id ?? "system:diagnosis",
-  });
-
-  if (sink.aborted()) return;
-  const critique = await runSystemPrompt(
-    "critique",
-    createCritiqueAgent(),
-    JSON.stringify({ diagnosis, artifact }),
-    bytes,
-    sink.abortSignal,
-  );
-  if (sink.aborted()) return;
-  sink.setReport("critique", report(critique, bytes));
-  await postDecisionLog({
-    type: "diagnosis",
-    payload: { step: "critique", hash: payloadHash(critique) },
-    evidence_ref: latest?.id ?? "system:critique",
-  });
 }

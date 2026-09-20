@@ -224,7 +224,6 @@ class QualityReport(SizedArtifact):
     batch_id: str
     checks: list[QualityItem] = Field(default_factory=list, max_length=40)
     exclusion_list: list[str] = Field(default_factory=list, max_length=40)
-    data_trusted: bool = True
 
 
 class DriftScoreRequest(BaseModel):

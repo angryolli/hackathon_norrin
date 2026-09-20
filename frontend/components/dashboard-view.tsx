@@ -5,22 +5,28 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { ChatMarkdown } from "@/components/chat-markdown";
 import { DashboardSection } from "@/components/dashboard-section";
 import { DashboardSourcesMap } from "@/components/dashboard-sources-map";
 import { SensorIntelGrid } from "@/components/sensor-intel-card";
-import { Badge } from "@/components/ui/badge";
 import {
   DriftPane,
   fmt,
   IDLE_AGENT,
-  ReportPane,
   stepLabel,
   type SystemAgentStatus,
 } from "@/components/monitor-panes";
 import { eventsStreamUrl, monitorStreamUrl, type MonitorSnapshot } from "@/lib/browser-api";
 import type { DiagnosisSignal, DiagnosisSnapshot } from "@/lib/pipeline";
 import { useSimulation } from "@/components/simulation-context";
+
+function mergeAgent(data: SystemAgentStatus): SystemAgentStatus {
+  return {
+    ...IDLE_AGENT,
+    ...data,
+    sensors: data.sensors ?? {},
+    alarmDiagnoses: data.alarmDiagnoses ?? {},
+  };
+}
 
 export function DashboardView() {
   const router = useRouter();
@@ -144,7 +150,7 @@ export function DashboardView() {
       try {
         const res = await fetch("/api/system-agent");
         const data = (await res.json()) as SystemAgentStatus;
-        if (on) setSystemAgent({ ...IDLE_AGENT, ...data, sensors: data.sensors ?? {} });
+        if (on) setSystemAgent(mergeAgent(data));
       } catch {
         /* ignore */
       }
@@ -156,13 +162,13 @@ export function DashboardView() {
   }, [resetRevision]);
 
   useEffect(() => {
-    if (!systemAgent.running) return;
+    if (!systemAgent.running && !systemAgent.rootCauseSignalId) return;
     let on = true;
     const id = window.setInterval(() => {
       fetch("/api/system-agent")
         .then((r) => r.json())
         .then((data: SystemAgentStatus) => {
-          if (on) setSystemAgent({ ...IDLE_AGENT, ...data, sensors: data.sensors ?? {} });
+          if (on) setSystemAgent(mergeAgent(data));
         })
         .catch(() => undefined);
     }, 800);
@@ -170,7 +176,7 @@ export function DashboardView() {
       on = false;
       window.clearInterval(id);
     };
-  }, [systemAgent.running]);
+  }, [systemAgent.running, systemAgent.rootCauseSignalId]);
 
   async function toggleSystemAgent() {
     setSystemAgentBusy(true);
@@ -181,7 +187,7 @@ export function DashboardView() {
         body: JSON.stringify({ running: !systemAgent.running }),
       });
       const data = (await res.json()) as SystemAgentStatus;
-      setSystemAgent({ ...IDLE_AGENT, ...data, sensors: data.sensors ?? {} });
+      setSystemAgent(mergeAgent(data));
     } catch {
       /* ignore */
     } finally {
@@ -189,19 +195,54 @@ export function DashboardView() {
     }
   }
 
+  async function requestRootCause(signalId: string) {
+    setOpen(signalId);
+    setSystemAgent((prev) => ({
+      ...prev,
+      step: "diagnosis",
+      rootCauseSignalId: signalId,
+      error: null,
+    }));
+    try {
+      const res = await fetch("/api/system-agent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rootCauseSignalId: signalId }),
+      });
+      const data = (await res.json()) as SystemAgentStatus & { error?: string };
+      if (!res.ok) {
+        setSystemAgent((prev) => ({
+          ...prev,
+          step: "error",
+          rootCauseSignalId: null,
+          error: data.error ?? "Root-cause analysis failed",
+        }));
+        return;
+      }
+      setSystemAgent(mergeAgent(data));
+    } catch {
+      setSystemAgent((prev) => ({
+        ...prev,
+        step: "error",
+        rootCauseSignalId: null,
+        error: "Root-cause analysis failed",
+      }));
+    }
+  }
+
   const fields = snap?.fields ?? [];
   const tick = snap?.tick ?? current?.tick ?? 0;
-  const qualityBadge =
-    systemAgent.dataTrusted == null
-      ? null
-      : systemAgent.dataTrusted
-        ? "DATA_TRUSTED"
-        : "WITHHELD";
+  const agentStatusLabel =
+    systemAgent.running || systemAgent.rootCauseSignalId
+      ? stepLabel(systemAgent.step, systemAgent.rootCauseSignalId)
+      : systemAgent.error
+        ? systemAgent.error
+        : "Manual cycle · understanding and quality";
 
   return (
     <div className="flex h-full min-h-0">
       <div className="min-h-0 min-w-0 flex-1 overflow-y-auto p-4">
-        <div className="mx-auto max-w-3xl space-y-8 pb-8">
+        <div className="mx-auto max-w-3xl space-y-10 pb-8">
           <DashboardSourcesMap
             fields={fields}
             playing={playing}
@@ -219,28 +260,26 @@ export function DashboardView() {
 
           <DashboardSection
             title="Quality"
-            subtitle="Instrument health for the current run. Pass/fail gate before root cause."
+            subtitle="Instrument health for the current run."
+            emphasis
+            divider
           >
-            {qualityBadge && (
-              <div className="flex justify-end">
-                <Badge variant={systemAgent.dataTrusted === false ? "destructive" : "secondary"}>
-                  {qualityBadge}
-                </Badge>
-              </div>
-            )}
-            <DashboardSection title="Data quality checks" variant="secondary">
+            <DashboardSection title="Data quality checks" variant="secondary" emphasis>
               <SensorIntelGrid fields={fields} sensors={systemAgent.sensors} mode="quality" />
             </DashboardSection>
           </DashboardSection>
 
           <DashboardSection
             title="Alarms"
-            subtitle="Live drift flags and root-cause diagnosis for the current run."
+            subtitle="Drift flags from the live stream. Run root-cause analysis per alarm when needed."
+            emphasis
+            divider
           >
             <DashboardSection
               title="Drift & anomaly detection"
-              subtitle="Continuous monitoring output. Alarms reference the channels responsible."
+              subtitle="Continuous monitoring output. Use Do root cause analysis on an alarm card to investigate it."
               variant="secondary"
+              emphasis
             >
               <DriftPane
                 current={current}
@@ -248,28 +287,11 @@ export function DashboardView() {
                 open={open}
                 setOpen={setOpen}
                 onAsk={(id) => router.push(`/agent?context=signal_id=${id}`)}
+                onRootCause={(id) => void requestRootCause(id)}
+                alarmDiagnoses={systemAgent.alarmDiagnoses}
+                rootCauseSignalId={systemAgent.rootCauseSignalId}
                 hideHeader
               />
-            </DashboardSection>
-
-            <DashboardSection
-              title="Root-cause diagnosis"
-              subtitle="Fault type, ranked contributing sensors, and a plain-language walkthrough."
-              variant="secondary"
-            >
-              <ReportPane
-                title="Diagnosis"
-                blurb=""
-                report={systemAgent.diagnosis}
-                running={systemAgent.running && systemAgent.step === "diagnosis"}
-                hideTitle
-              />
-              {systemAgent.critique && (
-                <div className="rounded-xl border border-border bg-card p-4">
-                  <h3 className="mb-2 text-sm font-medium">Critique</h3>
-                  <ChatMarkdown text={systemAgent.critique.text} />
-                </div>
-              )}
             </DashboardSection>
           </DashboardSection>
         </div>
@@ -285,7 +307,7 @@ export function DashboardView() {
             variant={systemAgent.running ? "secondary" : "default"}
             className="h-auto w-full justify-start gap-2 py-2 whitespace-normal"
             onClick={() => void toggleSystemAgent()}
-            disabled={systemAgentBusy}
+            disabled={systemAgentBusy || Boolean(systemAgent.rootCauseSignalId)}
             aria-label={systemAgent.running ? "Stop system agent" : "Launch system agent"}
           >
             {systemAgent.running ? (
@@ -297,13 +319,7 @@ export function DashboardView() {
               {systemAgent.running ? "Stop system agent" : "Launch system agent"}
             </span>
           </Button>
-          <p className="mt-1.5 px-1 font-mono text-[10px] text-muted-foreground">
-            {systemAgent.running
-              ? stepLabel(systemAgent.step)
-              : systemAgent.error
-                ? systemAgent.error
-                : "Manual cycle · understanding, quality, diagnosis"}
-          </p>
+          <p className="mt-1.5 px-1 font-mono text-[10px] text-muted-foreground">{agentStatusLabel}</p>
         </div>
         <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-3 text-[11px] text-muted-foreground">
           <p>

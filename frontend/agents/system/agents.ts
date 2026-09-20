@@ -64,9 +64,8 @@ Write JSON only (no markdown) judging EACH FIELD's instrument/data quality. Do n
 Look for frozen (sd near 0), too few samples, implausible moments, not yet calibrated. That is a broken or weak sensor, not a process fault.
 A channel with sd near 0 is also a detector blind spot: the z-score divides by a floor there, so it can swing between silence and a huge |z| on the first real move.
 Shape:
-{"data_trusted":true,"fields":[{"field_id":"exact id from the artifact","faulty":false,"issue":"none|frozen|too_few_samples|implausible|uncalibrated","adjective":"Excellent|Good|Fair|Poor|Untrusted","confidence":0.0,"summary":"one sentence on this field only"}]}
-adjective is a quality scale, not an alarm. field_id MUST copy the artifact exactly.
-data_trusted is false only if the incoming data itself cannot be used.`,
+{"fields":[{"field_id":"exact id from the artifact","faulty":false,"issue":"none|frozen|too_few_samples|implausible|uncalibrated","adjective":"Excellent|Good|Fair|Poor|Untrusted","confidence":0.0,"summary":"one sentence on this field only"}]}
+adjective is a quality scale, not an alarm. field_id MUST copy the artifact exactly.`,
   });
 }
 
@@ -82,6 +81,40 @@ Write a root-cause diagnosis for a non-technical operator.
 If there is no yellow/red signal, say no fault event is open and summarize the current sample's max |z| and how far it is from the yellow gate.
 Otherwise: likely fault type (hypothesis), ranked contributing fields with why, confidence, and numbered steps.
 Do not invent fields. Cite signal id and tick.`,
+  });
+}
+
+export function createAlarmRootCauseAgent() {
+  const provider = new LLMProvider();
+  return new ToolLoopAgent({
+    model: provider.model,
+    stopWhen: isStepCount(1),
+    tools: {},
+    instructions: `You are an on-demand root-cause analyst for an industrial process monitor.
+An operator clicked "Do root cause analysis" on ONE specific yellow or red alarm.
+You receive a structured artifact with:
+- target_alarm: the alarm under investigation (id, tick, level, |z|, evidence, ranked contributing fields)
+- current_sample: live statistical fingerprints for every watched channel
+- agent_notes: prior understanding (role/hypothesis) and quality judgments per field from an earlier system pass
+- run_context: how the z-score detector works
+- other_open_alarms: sibling alarms for context only
+
+Your job is to explain the most likely process or equipment fault behind THIS alarm only.
+Write for a non-technical operator in plain language (no JSON in the answer).
+
+Structure your answer:
+1. What happened — cite alarm id, tick, level, and the leading field(s) with |z|
+2. Likely fault type — hypothesis with confidence (low/medium/high)
+3. Why these channels — tie ranked fields to the hypothesis using moments, roles from agent_notes, and quality flags
+4. What to check next — numbered operator steps
+5. Uncertainty — what could disprove this or what data is missing
+
+Rules:
+- Ground every claim in field_id, tick, |z|, or signal id from the artifact
+- Use agent_notes roles and quality as hypotheses, not as ground truth
+- Use quality flags from agent_notes to distinguish sensor failure from process fault when relevant
+- Do not invent fields, ticks, or alarms
+- Do not analyze alarms that are not target_alarm unless comparing briefly`,
   });
 }
 

@@ -55,7 +55,7 @@ export function ReportsView() {
           <div className="mx-auto max-w-3xl">
             <h2 className="mb-3 text-sm font-medium">Data quality checks</h2>
             <p className="mb-3 text-sm text-muted-foreground">
-              Per-channel quality assessment and DATA_TRUSTED gate for the current run.
+              Per-channel quality assessment for the current run.
             </p>
             <FieldReportsView key={`q-${resetRevision}`} mode="quality" />
           </div>

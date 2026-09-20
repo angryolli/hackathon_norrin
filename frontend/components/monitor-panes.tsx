@@ -76,11 +76,12 @@ export type SystemAgentStatus = {
   lastBeatAt: string | null;
   error: string | null;
   eventId: string | null;
-  dataTrusted: boolean | null;
   understanding: SystemReport | null;
   quality: SystemReport | null;
   diagnosis: SystemReport | null;
   critique: SystemReport | null;
+  alarmDiagnoses: Record<string, SystemReport>;
+  rootCauseSignalId: string | null;
   sensors: Record<string, SensorNote>;
   dataFlow: DataFlowRecord;
 };
@@ -94,11 +95,12 @@ export const IDLE_AGENT: SystemAgentStatus = {
   lastBeatAt: null,
   error: null,
   eventId: null,
-  dataTrusted: null,
   understanding: null,
   quality: null,
   diagnosis: null,
   critique: null,
+  alarmDiagnoses: {},
+  rootCauseSignalId: null,
   sensors: {},
   dataFlow: {
     model: "—",
@@ -110,10 +112,12 @@ export const IDLE_AGENT: SystemAgentStatus = {
   },
 };
 
-export function stepLabel(step: SystemAgentStatus["step"]) {
+export function stepLabel(step: SystemAgentStatus["step"], rootCauseSignalId?: string | null) {
   if (step === "understanding") return "Understanding…";
   if (step === "quality") return "Quality…";
-  if (step === "diagnosis") return "Root cause…";
+  if (step === "diagnosis") {
+    return rootCauseSignalId ? `Root cause for ${rootCauseSignalId}…` : "Root cause…";
+  }
   if (step === "error") return "Cycle failed";
   return "Idle";
 }
@@ -223,6 +227,9 @@ export function DriftPane({
   open,
   setOpen,
   onAsk,
+  onRootCause,
+  alarmDiagnoses = {},
+  rootCauseSignalId = null,
   hideHeader = false,
 }: {
   current: DiagnosisSnapshot["current"] | null;
@@ -230,6 +237,9 @@ export function DriftPane({
   open: string | null;
   setOpen: (id: string | null) => void;
   onAsk: (id: string) => void;
+  onRootCause?: (id: string) => void;
+  alarmDiagnoses?: Record<string, SystemReport>;
+  rootCauseSignalId?: string | null;
   hideHeader?: boolean;
 }) {
   const k = current?.k ?? 6;
@@ -273,8 +283,10 @@ export function DriftPane({
               const field = top ? fieldLabel(top.field_id) : null;
               const href = alarmTelemetryHref(row);
               const expanded = open === row.id;
+              const diagnosis = alarmDiagnoses[row.id] ?? null;
+              const rootCauseBusy = rootCauseSignalId === row.id;
               return (
-                <li key={row.id} className="px-4 py-3">
+                <li key={row.id} className="px-4 py-4">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0 space-y-1">
                       <div className="flex flex-wrap items-center gap-2 font-mono text-xs">
@@ -310,6 +322,16 @@ export function DriftPane({
                       </p>
                     </div>
                     <div className="flex shrink-0 flex-wrap gap-2">
+                      {onRootCause && (
+                        <Button
+                          size="sm"
+                          variant="default"
+                          disabled={Boolean(rootCauseSignalId)}
+                          onClick={() => onRootCause(row.id)}
+                        >
+                          {rootCauseBusy ? "Analyzing…" : "Do root cause analysis"}
+                        </Button>
+                      )}
                       <Link
                         href={href}
                         className={buttonVariants({ variant: "outline", size: "sm" })}
@@ -325,6 +347,22 @@ export function DriftPane({
                       </Button>
                     </div>
                   </div>
+                  {rootCauseBusy && (
+                    <p className="mt-3 text-sm text-muted-foreground">
+                      Running root-cause analysis for this alarm…
+                    </p>
+                  )}
+                  {diagnosis && !rootCauseBusy && (
+                    <div className="mt-4 rounded-lg border border-border bg-background/60 p-4">
+                      <p className="mb-2 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+                        Root-cause analysis
+                      </p>
+                      <p className="mb-3 font-mono text-[10px] text-muted-foreground">
+                        {diagnosis.model} · {new Date(diagnosis.generatedAt).toLocaleString()}
+                      </p>
+                      <ChatMarkdown text={diagnosis.text} />
+                    </div>
+                  )}
                   {expanded && (
                     <div className="mt-3 space-y-3 border-t border-border pt-3">
                       <p className="font-mono text-[11px] text-muted-foreground">{row.evidence}</p>

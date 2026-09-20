@@ -80,13 +80,5 @@ export function parseQualityFields(text: string) {
       summary: asString(item.summary),
     };
   }
-  const trustedRaw = json?.data_trusted;
-  let dataTrusted: boolean | null = null;
-  if (typeof trustedRaw === "boolean") dataTrusted = trustedRaw;
-  else if (typeof trustedRaw === "string") {
-    const s = trustedRaw.toLowerCase();
-    if (s === "yes" || s === "true") dataTrusted = true;
-    if (s === "no" || s === "false") dataTrusted = false;
-  }
-  return { fields: out, dataTrusted };
+  return { fields: out };
 }

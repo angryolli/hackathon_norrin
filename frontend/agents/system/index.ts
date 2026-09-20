@@ -1,11 +1,13 @@
 export {
   getSystemAgentStatus,
   resetSystemAgent,
+  startAlarmRootCause,
   startSystemAgent,
   stopSystemAgent,
   type SystemAgentStatus,
 } from "./runtime";
 export {
+  createAlarmRootCauseAgent,
   createCritiqueAgent,
   createQualityAgent,
   createRootCauseAgent,

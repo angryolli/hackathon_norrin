@@ -1,5 +1,6 @@
 import "server-only";
 
+import { runAlarmRootCause } from "./alarm-root-cause";
 import { dataFlowRecord, runSystemCycle } from "./cycle";
 import type { SystemAgentStatus, SystemReport, SystemStep } from "./types";
 
@@ -7,6 +8,8 @@ type Handle = {
   status: Omit<SystemAgentStatus, "dataFlow">;
   abort: AbortController | null;
   job: Promise<void> | null;
+  rootCauseAbort: AbortController | null;
+  rootCauseJob: Promise<void> | null;
 };
 
 const g = globalThis as typeof globalThis & {
@@ -23,11 +26,12 @@ function emptyStatus(): Omit<SystemAgentStatus, "dataFlow"> {
     lastBeatAt: null,
     error: null,
     eventId: null,
-    dataTrusted: null,
     understanding: null,
     quality: null,
     diagnosis: null,
     critique: null,
+    alarmDiagnoses: {},
+    rootCauseSignalId: null,
     sensors: {},
   };
 }
@@ -38,6 +42,8 @@ function handle(): Handle {
       status: emptyStatus(),
       abort: null,
       job: null,
+      rootCauseAbort: null,
+      rootCauseJob: null,
     };
   }
   return g.__norrinSystemAgent;
@@ -46,6 +52,7 @@ function handle(): Handle {
 function snapshot(): SystemAgentStatus {
   const status = handle().status;
   if (!status.sensors) status.sensors = {};
+  if (!status.alarmDiagnoses) status.alarmDiagnoses = {};
   return { ...status, dataFlow: dataFlowRecord() };
 }
 
@@ -72,9 +79,6 @@ export function startSystemAgent(): SystemAgentStatus {
     },
     setEventId: (id) => {
       runtime.status.eventId = id;
-    },
-    setDataTrusted: (value) => {
-      runtime.status.dataTrusted = value;
     },
     setReport: (key, report: SystemReport) => {
       runtime.status[key] = report;
@@ -114,11 +118,58 @@ export function stopSystemAgent(): SystemAgentStatus {
   return snapshot();
 }
 
+export async function startAlarmRootCause(signalId: string): Promise<SystemAgentStatus> {
+  const runtime = handle();
+  if (runtime.status.rootCauseSignalId) {
+    throw new Error("Root-cause analysis is already running.");
+  }
+  if (runtime.rootCauseJob) {
+    await runtime.rootCauseJob;
+  }
+
+  runtime.rootCauseAbort = new AbortController();
+  runtime.status.rootCauseSignalId = signalId;
+  runtime.status.error = null;
+  runtime.status.step = "diagnosis";
+  runtime.status.lastBeatAt = new Date().toISOString();
+
+  const abort = runtime.rootCauseAbort;
+  runtime.rootCauseJob = runAlarmRootCause(
+    signalId,
+    runtime.status.sensors ?? {},
+    abort.signal,
+  )
+    .then((report) => {
+      if (abort.signal.aborted) return;
+      runtime.status.alarmDiagnoses = {
+        ...(runtime.status.alarmDiagnoses ?? {}),
+        [signalId]: report,
+      };
+      runtime.status.lastBeatAt = new Date().toISOString();
+    })
+    .catch((err) => {
+      runtime.status.error = err instanceof Error ? err.message : "root-cause analysis failed";
+      runtime.status.step = "error";
+    })
+    .finally(() => {
+      runtime.status.rootCauseSignalId = null;
+      if (runtime.status.step === "diagnosis") runtime.status.step = "idle";
+      runtime.rootCauseAbort = null;
+      runtime.rootCauseJob = null;
+    });
+
+  await runtime.rootCauseJob;
+  return snapshot();
+}
+
 export function resetSystemAgent(): SystemAgentStatus {
   const runtime = handle();
   runtime.abort?.abort();
+  runtime.rootCauseAbort?.abort();
   runtime.abort = null;
+  runtime.rootCauseAbort = null;
   runtime.job = null;
+  runtime.rootCauseJob = null;
   runtime.status = emptyStatus();
   return snapshot();
 }
