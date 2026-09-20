@@ -2,7 +2,6 @@
 
 import { Bot, Pause } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { DashboardSection } from "@/components/dashboard-section";
@@ -29,7 +28,6 @@ function mergeAgent(data: SystemAgentStatus): SystemAgentStatus {
 }
 
 export function DashboardView() {
-  const router = useRouter();
   const [snap, setSnap] = useState<MonitorSnapshot | null>(null);
   const [signals, setSignals] = useState<DiagnosisSignal[]>([]);
   const [current, setCurrent] = useState<DiagnosisSnapshot["current"] | null>(null);
@@ -286,7 +284,6 @@ export function DashboardView() {
                 signals={signals}
                 open={open}
                 setOpen={setOpen}
-                onAsk={(id) => router.push(`/agent?context=signal_id=${id}`)}
                 onRootCause={(id) => void requestRootCause(id)}
                 alarmDiagnoses={systemAgent.alarmDiagnoses}
                 rootCauseSignalId={systemAgent.rootCauseSignalId}

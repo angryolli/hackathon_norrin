@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { alarmsOldestFirst } from "@/components/monitor-panes";
 import { browserGet } from "@/lib/browser-api";
 import type { DiagnosisSignal, DiagnosisSnapshot } from "@/lib/pipeline";
 
@@ -30,14 +31,16 @@ export function AlarmLogView({ runId }: { runId?: string }) {
     };
   }, [runId]);
 
+  const orderedSignals = useMemo(() => alarmsOldestFirst(signals), [signals]);
+
   return (
     <ul className="space-y-2 font-mono text-xs">
-      {signals.length === 0 && (
+      {orderedSignals.length === 0 && (
         <li className="rounded-md border border-border p-3 text-muted-foreground">
           No alarms in this run.
         </li>
       )}
-      {signals.map((row) => (
+      {orderedSignals.map((row) => (
         <li key={row.id} className="rounded-md border border-border p-3">
           <p>
             {row.id} · {row.level} · tick {row.tick} · score {row.score.toFixed(2)} · z{" "}

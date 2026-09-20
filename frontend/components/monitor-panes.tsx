@@ -1,13 +1,32 @@
 "use client";
 
-import { Activity, Check, HelpCircle, ShieldAlert } from "lucide-react";
+import {
+  Activity,
+  Brain,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Eye,
+  EyeOff,
+  HelpCircle,
+  Loader2,
+  ShieldAlert,
+} from "lucide-react";
 import Link from "next/link";
+import { useMemo, useState, type ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ChatMarkdown } from "@/components/chat-markdown";
 import { cn } from "@/lib/utils";
 import type { DiagnosisSignal, DiagnosisSnapshot } from "@/lib/pipeline";
+
+export function alarmsOldestFirst(signals: DiagnosisSignal[]) {
+  return [...signals].sort((a, b) => {
+    if (a.tick !== b.tick) return a.tick - b.tick;
+    return a.created_at.localeCompare(b.created_at);
+  });
+}
 
 export function fieldLabel(id: string) {
   const sep = id.indexOf("::");
@@ -34,10 +53,15 @@ export function alarmMetricLabels(row: DiagnosisSignal, k: number): string[] {
   const origins = row.origins ?? [];
   const reason = (row.reason ?? "").toLowerCase();
   const hasZ =
-    origins.includes("zscore") || reason.includes("z-score") || reason.includes("zscore");
+    origins.includes("zscore") ||
+    reason.includes("z-score") ||
+    reason.includes("zscore");
   const hasV5 =
-    origins.some((o) => o !== "zscore") || reason.includes("v5") || reason.includes("moment")
-    || reason.includes("freeze") || reason.includes("amp");
+    origins.some((o) => o !== "zscore") ||
+    reason.includes("v5") ||
+    reason.includes("moment") ||
+    reason.includes("freeze") ||
+    reason.includes("amp");
 
   if (hasZ && !hasV5) {
     return [`|z| ${fmt(row.z)}`, `score ${fmt(row.score)}/${k}`];
@@ -140,11 +164,16 @@ export const IDLE_AGENT: SystemAgentStatus = {
   },
 };
 
-export function stepLabel(step: SystemAgentStatus["step"], rootCauseSignalId?: string | null) {
+export function stepLabel(
+  step: SystemAgentStatus["step"],
+  rootCauseSignalId?: string | null,
+) {
   if (step === "understanding") return "Understanding…";
   if (step === "quality") return "Quality…";
   if (step === "diagnosis") {
-    return rootCauseSignalId ? `Root cause for ${rootCauseSignalId}…` : "Root cause…";
+    return rootCauseSignalId
+      ? `Root cause for ${rootCauseSignalId}…`
+      : "Root cause…";
   }
   if (step === "error") return "Cycle failed";
   return "Idle";
@@ -176,7 +205,9 @@ export function NavButton<Id extends string>({
       <Icon className="size-4 shrink-0" />
       <span className="min-w-0 flex-1 truncate">{item.label}</span>
       {item.hint ? (
-        <span className="font-mono text-[10px] text-muted-foreground">{item.hint}</span>
+        <span className="font-mono text-[10px] text-muted-foreground">
+          {item.hint}
+        </span>
       ) : warn ? (
         <span className="font-mono text-[10px] text-red-300">no</span>
       ) : null}
@@ -210,28 +241,37 @@ export function ReportPane({
             <p className="mt-1 text-sm text-muted-foreground">{blurb}</p>
           </div>
           {badge && (
-            <Badge variant={badgeTone === "bad" ? "destructive" : "secondary"}>{badge}</Badge>
+            <Badge variant={badgeTone === "bad" ? "destructive" : "secondary"}>
+              {badge}
+            </Badge>
           )}
         </div>
       )}
       {hideTitle && badge && (
         <div className="flex justify-end">
-          <Badge variant={badgeTone === "bad" ? "destructive" : "secondary"}>{badge}</Badge>
+          <Badge variant={badgeTone === "bad" ? "destructive" : "secondary"}>
+            {badge}
+          </Badge>
         </div>
       )}
-      {running && <p className="font-mono text-xs text-muted-foreground">Writing this report…</p>}
+      {running && (
+        <p className="font-mono text-xs text-muted-foreground">
+          Writing this report…
+        </p>
+      )}
       {report ? (
         <div className="rounded-xl border border-border bg-card p-4">
           <p className="mb-3 font-mono text-[10px] text-muted-foreground">
-            {report.model} · {new Date(report.generatedAt).toLocaleString()} · hash {report.hash} ·{" "}
-            {report.bytes} B in
+            {report.model} · {new Date(report.generatedAt).toLocaleString()} ·
+            hash {report.hash} · {report.bytes} B in
           </p>
           <ChatMarkdown text={report.text} />
         </div>
       ) : (
         !running && (
           <p className="text-sm text-muted-foreground">
-            Nothing yet. Launch the system agent on System Dashboard for one cycle.
+            Nothing yet. Launch the system agent on System Dashboard for one
+            cycle.
           </p>
         )
       )}
@@ -249,12 +289,50 @@ function alarmTelemetryHref(row: DiagnosisSignal) {
   return top ? telemetryHref(top.field_id) : "/telemetry";
 }
 
+const ALARM_ROW_GRID =
+  "grid grid-cols-[2rem_3rem_3rem_3.25rem_minmax(4.5rem,1fr)_minmax(3.5rem,1fr)_auto] items-center gap-x-2";
+
+const ALARM_ACTION_LEGEND = [
+  { icon: Brain, label: "Run root-cause analysis" },
+  { icon: Eye, label: "Show or hide analysis" },
+  { icon: ChevronRight, label: "Expand channel stats" },
+  { icon: Activity, label: "View in Telemetry" },
+] as const;
+
+function AlarmIconButton({
+  label,
+  onClick,
+  disabled,
+  children,
+  active,
+}: {
+  label: string;
+  onClick?: () => void;
+  disabled?: boolean;
+  children: ReactNode;
+  active?: boolean;
+}) {
+  return (
+    <Button
+      type="button"
+      size="icon-xs"
+      variant={active ? "secondary" : "ghost"}
+      className="size-6 shrink-0"
+      title={label}
+      aria-label={label}
+      disabled={disabled}
+      onClick={onClick}
+    >
+      {children}
+    </Button>
+  );
+}
+
 export function DriftPane({
   current,
   signals,
   open,
   setOpen,
-  onAsk,
   onRootCause,
   alarmDiagnoses = {},
   rootCauseSignalId = null,
@@ -264,7 +342,6 @@ export function DriftPane({
   signals: DiagnosisSignal[];
   open: string | null;
   setOpen: (id: string | null) => void;
-  onAsk: (id: string) => void;
   onRootCause?: (id: string) => void;
   alarmDiagnoses?: Record<string, SystemReport>;
   rootCauseSignalId?: string | null;
@@ -273,6 +350,10 @@ export function DriftPane({
   const k = current?.k ?? 6;
   const zYellow = current?.z_yellow ?? 4;
   const zRed = current?.z_red ?? 6;
+  const orderedSignals = useMemo(() => alarmsOldestFirst(signals), [signals]);
+  const [rootCauseExpanded, setRootCauseExpanded] = useState<
+    Record<string, boolean>
+  >({});
 
   return (
     <div className="space-y-3">
@@ -280,11 +361,13 @@ export function DriftPane({
         <div>
           <h2 className="text-sm font-medium">Alarms</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Two detectors share this log. Rolling z-score: yellow after {k} consecutive samples past{" "}
-            {fmt(zYellow)}σ, red past {fmt(zRed)}σ — brief spikes do not open one. v5 agnostic:
-            expanding-moment RMS, freeze streaks, and amplitude envelope (gates ease after burn-in).
-            Plant level is the max of both — either can open an alarm. Score/k is the z-score streak
-            when that model fires; v5-only rows show moment/freeze/amp instead.
+            Two detectors share this log. Rolling z-score: yellow after {k}{" "}
+            consecutive samples past {fmt(zYellow)}σ, red past {fmt(zRed)}σ —
+            brief spikes do not open one. v5 agnostic: expanding-moment RMS,
+            freeze streaks, and amplitude envelope (gates ease after burn-in).
+            Plant level is the max of both — either can open an alarm. Score/k
+            is the z-score streak when that model fires; v5-only rows show
+            moment/freeze/amp instead.
           </p>
         </div>
       )}
@@ -303,136 +386,218 @@ export function DriftPane({
           No alarms yet. Play the stream — a single spike never opens one.
         </p>
       ) : (
-        <div className="overflow-hidden rounded-xl border border-border bg-card">
-          <ul className="divide-y divide-border">
-            {signals.map((row) => {
-              const top = row.top_fields[0];
-              const source = top ? sourceLabel(top.field_id) : "";
-              const field = top ? fieldLabel(top.field_id) : null;
-              const href = alarmTelemetryHref(row);
-              const expanded = open === row.id;
-              const diagnosis = alarmDiagnoses[row.id] ?? null;
-              const rootCauseBusy = rootCauseSignalId === row.id;
-              const metrics = alarmMetricLabels(row, k);
-              return (
-                <li key={row.id} className="px-4 py-4">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="min-w-0 space-y-1">
-                      <div className="flex flex-wrap items-center gap-2 font-mono text-xs">
-                        <span
-                          className={
-                            row.level === "red" ? "font-medium text-red-300" : "font-medium text-amber-300"
+        <div className="overflow-x-auto rounded-xl border border-border bg-card">
+          <div className="min-w-[36rem]">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-border bg-muted/20 px-2 py-1.5 text-[10px] text-muted-foreground">
+              {ALARM_ACTION_LEGEND.map(({ icon: Icon, label }) => (
+                <span key={label} className="inline-flex items-center gap-1.5">
+                  <span className="inline-flex size-6 items-center justify-center rounded-md border border-border/60 bg-background">
+                    <Icon className="size-3" aria-hidden="true" />
+                  </span>
+                  {label}
+                </span>
+              ))}
+            </div>
+            <div
+              className={cn(
+                ALARM_ROW_GRID,
+                "border-b border-border bg-muted/40 px-2 py-1 font-mono text-[10px] tracking-wide text-muted-foreground uppercase",
+              )}
+            >
+              <span>Lvl</span>
+              <span className="text-right tabular-nums">Tick</span>
+              <span className="text-right tabular-nums">|z|</span>
+              <span className="text-right tabular-nums">Score</span>
+              <span>Field</span>
+              <span>Source</span>
+              <span aria-hidden="true" />
+            </div>
+            <ul>
+              {orderedSignals.map((row) => {
+                const top = row.top_fields[0];
+                const source = top ? sourceLabel(top.field_id) : "—";
+                const field = top ? fieldLabel(top.field_id) : "—";
+                const href = alarmTelemetryHref(row);
+                const expanded = open === row.id;
+                const diagnosis = alarmDiagnoses[row.id] ?? null;
+                const rootCauseBusy = rootCauseSignalId === row.id;
+                const hasRootCause = Boolean(diagnosis);
+                const showRootCause =
+                  hasRootCause && Boolean(rootCauseExpanded[row.id]);
+                return (
+                  <li
+                    key={row.id}
+                    className="border-b border-border last:border-b-0"
+                  >
+                    <div
+                      className={cn(
+                        ALARM_ROW_GRID,
+                        "px-2 py-1 font-mono text-[11px]",
+                      )}
+                    >
+                      <span
+                        className={cn(
+                          "font-semibold tabular-nums",
+                          row.level === "red"
+                            ? "text-red-300"
+                            : "text-amber-300",
+                        )}
+                        title={row.level}
+                      >
+                        {row.level === "red" ? "R" : "Y"}
+                      </span>
+                      <span className="text-right tabular-nums text-foreground">
+                        {row.tick}
+                      </span>
+                      <span className="text-right tabular-nums text-foreground">
+                        {fmt(row.z)}
+                      </span>
+                      <span className="text-right tabular-nums text-muted-foreground">
+                        {fmt(row.score)}/{k}
+                      </span>
+                      <span className="truncate text-foreground" title={field}>
+                        {field}
+                      </span>
+                      <span
+                        className="truncate text-muted-foreground"
+                        title={source}
+                      >
+                        {source}
+                      </span>
+                      <div className="flex items-center justify-end gap-0.5">
+                        {onRootCause && (
+                          <AlarmIconButton
+                            label={
+                              rootCauseBusy
+                                ? "Analyzing root cause"
+                                : "Do root cause analysis"
+                            }
+                            disabled={
+                              Boolean(rootCauseSignalId) || hasRootCause
+                            }
+                            onClick={() => onRootCause(row.id)}
+                          >
+                            {rootCauseBusy ? (
+                              <Loader2 className="size-3 animate-spin" />
+                            ) : (
+                              <Brain className="size-3" />
+                            )}
+                          </AlarmIconButton>
+                        )}
+                        <AlarmIconButton
+                          label={
+                            showRootCause
+                              ? "Hide root cause analysis"
+                              : "Show root cause analysis"
+                          }
+                          active={showRootCause}
+                          disabled={!hasRootCause}
+                          onClick={() =>
+                            setRootCauseExpanded((state) => ({
+                              ...state,
+                              [row.id]: !showRootCause,
+                            }))
                           }
                         >
-                          {row.level.toUpperCase()}
-                        </span>
-                        <span className="text-muted-foreground">tick {row.tick}</span>
-                        {metrics.map((label) => (
-                          <span key={label} className="text-muted-foreground">
-                            {label}
-                          </span>
-                        ))}
-                        {row.reason ? (
-                          <span className="rounded border border-border px-1.5 py-0.5 text-foreground">
-                            {row.reason}
-                          </span>
-                        ) : null}
-                      </div>
-                      <p className="text-sm text-muted-foreground">
-                        {field ? (
-                          <>
-                            Triggered on{" "}
-                            <span className="font-mono text-foreground">{field}</span>
-                            {source ? (
-                              <>
-                                {" "}
-                                in source{" "}
-                                <span className="font-mono text-foreground">{source}</span>
-                              </>
-                            ) : null}
-                          </>
-                        ) : (
-                          row.evidence || "Alarm opened from pooled channel z-scores."
-                        )}
-                      </p>
-                    </div>
-                    <div className="flex shrink-0 flex-wrap gap-2">
-                      {onRootCause && (
-                        <Button
-                          size="sm"
-                          variant="default"
-                          disabled={Boolean(rootCauseSignalId)}
-                          onClick={() => onRootCause(row.id)}
+                          {showRootCause ? (
+                            <EyeOff className="size-3" />
+                          ) : (
+                            <Eye className="size-3" />
+                          )}
+                        </AlarmIconButton>
+                        <AlarmIconButton
+                          label={
+                            expanded
+                              ? "Hide channel details"
+                              : "Show channel details"
+                          }
+                          active={expanded}
+                          onClick={() => setOpen(expanded ? null : row.id)}
                         >
-                          {rootCauseBusy ? "Analyzing…" : "Do root cause analysis"}
-                        </Button>
-                      )}
-                      <Link
-                        href={href}
-                        className={buttonVariants({ variant: "outline", size: "sm" })}
-                      >
-                        View in Telemetry
-                      </Link>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => setOpen(expanded ? null : row.id)}
-                      >
-                        {expanded ? "Hide" : "Details"}
-                      </Button>
+                          {expanded ? (
+                            <ChevronDown className="size-3" />
+                          ) : (
+                            <ChevronRight className="size-3" />
+                          )}
+                        </AlarmIconButton>
+                        <Link
+                          href={href}
+                          className={buttonVariants({
+                            variant: "ghost",
+                            size: "icon-xs",
+                          })}
+                          title="View in Telemetry"
+                          aria-label="View in Telemetry"
+                        >
+                          <Activity className="size-3" />
+                        </Link>
+                      </div>
                     </div>
-                  </div>
-                  {rootCauseBusy && (
-                    <p className="mt-3 text-sm text-muted-foreground">
-                      Running root-cause analysis for this alarm…
-                    </p>
-                  )}
-                  {diagnosis && !rootCauseBusy && (
-                    <div className="mt-4 rounded-lg border border-border bg-background/60 p-4">
-                      <p className="mb-2 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-                        Root-cause analysis
-                      </p>
-                      <p className="mb-3 font-mono text-[10px] text-muted-foreground">
-                        {diagnosis.model} · {new Date(diagnosis.generatedAt).toLocaleString()}
-                      </p>
-                      <ChatMarkdown text={diagnosis.text} />
-                    </div>
-                  )}
-                  {expanded && (
-                    <div className="mt-3 space-y-3 border-t border-border pt-3">
-                      {row.reason ? (
-                        <p className="text-xs text-muted-foreground">
-                          Reason:{" "}
-                          <span className="font-mono text-foreground">{row.reason}</span>
+                    {showRootCause && diagnosis && !rootCauseBusy && (
+                      <div className="border-t border-border/60 bg-muted/10 px-2 py-2">
+                        <p className="mb-1 font-mono text-[10px] text-muted-foreground">
+                          Root cause · {diagnosis.model} ·{" "}
+                          {new Date(diagnosis.generatedAt).toLocaleString()}
                         </p>
-                      ) : null}
-                      <p className="font-mono text-[11px] text-muted-foreground">{row.evidence}</p>
-                      {row.top_fields.length > 0 && (
-                        <ol className="list-decimal space-y-1 pl-4 font-mono text-xs">
-                          {row.top_fields.map((item) => (
-                            <li key={item.field_id}>
-                              <Link
-                                href={telemetryHref(item.field_id)}
-                                className="underline-offset-2 hover:underline"
+                        <div className="text-xs">
+                          <ChatMarkdown text={diagnosis.text} />
+                        </div>
+                      </div>
+                    )}
+                    {expanded && (
+                      <div className="border-t border-border/60 bg-muted/5 px-2 py-1.5">
+                        <p className="mb-1 truncate font-mono text-[10px] text-muted-foreground">
+                          {row.evidence ||
+                            "Alarm opened from pooled channel z-scores."}
+                        </p>
+                        {row.top_fields.length > 0 && (
+                          <div className="overflow-x-auto">
+                            <div className="grid min-w-[28rem] grid-cols-[minmax(5rem,1.2fr)_3rem_3.5rem_3.5rem_3rem_3rem] gap-x-2 border-b border-border/50 py-0.5 font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
+                              <span>Channel</span>
+                              <span className="text-right">|z|</span>
+                              <span className="text-right">Mean</span>
+                              <span className="text-right">SD</span>
+                              <span className="text-right">Skew</span>
+                              <span className="text-right">Kurt</span>
+                            </div>
+                            {row.top_fields.map((item) => (
+                              <div
+                                key={item.field_id}
+                                className="grid min-w-[28rem] grid-cols-[minmax(5rem,1.2fr)_3rem_3.5rem_3.5rem_3rem_3rem] gap-x-2 py-0.5 font-mono text-[10px]"
                               >
-                                {fieldLabel(item.field_id)}
-                              </Link>
-                              {" · |z| "}
-                              {fmt(item.score)} · mean {fmt(item.mean)} · sd {fmt(item.sd)} · skew{" "}
-                              {fmt(item.skew)} · kurt {fmt(item.kurt)}
-                            </li>
-                          ))}
-                        </ol>
-                      )}
-                      <Button size="sm" variant="outline" onClick={() => onAsk(row.id)}>
-                        Ask operator
-                      </Button>
-                    </div>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
+                                <Link
+                                  href={telemetryHref(item.field_id)}
+                                  className="truncate underline-offset-2 hover:underline"
+                                  title={item.field_id}
+                                >
+                                  {fieldLabel(item.field_id)}
+                                </Link>
+                                <span className="text-right tabular-nums">
+                                  {fmt(item.score)}
+                                </span>
+                                <span className="text-right tabular-nums text-muted-foreground">
+                                  {fmt(item.mean)}
+                                </span>
+                                <span className="text-right tabular-nums text-muted-foreground">
+                                  {fmt(item.sd)}
+                                </span>
+                                <span className="text-right tabular-nums text-muted-foreground">
+                                  {fmt(item.skew)}
+                                </span>
+                                <span className="text-right tabular-nums text-muted-foreground">
+                                  {fmt(item.kurt)}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
         </div>
       )}
     </div>
@@ -445,8 +610,8 @@ export function FlowPane({ flow }: { flow: DataFlowRecord }) {
       <div>
         <h2 className="text-sm font-medium">Data flow</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          What leaves this environment, to which model, and why. The LLM layer is swapped by config,
-          not a rewrite.
+          What leaves this environment, to which model, and why. The LLM layer
+          is swapped by config, not a rewrite.
         </p>
       </div>
       <dl className="space-y-3 rounded-xl border border-border bg-card p-4 text-sm">
@@ -458,7 +623,9 @@ export function FlowPane({ flow }: { flow: DataFlowRecord }) {
         </div>
         <div>
           <dt className="text-xs text-muted-foreground">No-egress</dt>
-          <dd className="font-mono text-xs">{flow.noEgress ? "on — local host required" : "off"}</dd>
+          <dd className="font-mono text-xs">
+            {flow.noEgress ? "on — local host required" : "off"}
+          </dd>
         </div>
         <div>
           <dt className="text-xs text-muted-foreground">What leaves</dt>
@@ -475,9 +642,9 @@ export function FlowPane({ flow }: { flow: DataFlowRecord }) {
         <div>
           <dt className="text-xs text-muted-foreground">Adaptability</dt>
           <dd>
-            Sources are unlabeled columns with a kind of process, business, or other. The z-score
-            detector and these reports never require TEP names. A second CSV under Telemetry is the
-            same pipeline.
+            Sources are unlabeled columns with a kind of process, business, or
+            other. The z-score detector and these reports never require TEP
+            names. A second CSV under Telemetry is the same pipeline.
           </dd>
         </div>
       </dl>
@@ -510,15 +677,17 @@ export function ReviewPane({
         <div>
           <h2 className="text-sm font-medium">Judgment</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Accept, question, or override the latest system conclusion. Everything on this dashboard
-            is in front of you. Questions open the operator chat. Every action is written to the
-            decision log.
+            Accept, question, or override the latest system conclusion.
+            Everything on this dashboard is in front of you. Questions open the
+            operator chat. Every action is written to the decision log.
           </p>
         </div>
       )}
       <p className="font-mono text-xs text-muted-foreground">
         target {eventId ?? "system:diagnosis"}
-        {lastCycleAt ? ` · last cycle ${new Date(lastCycleAt).toLocaleTimeString()}` : " · no cycle yet"}
+        {lastCycleAt
+          ? ` · last cycle ${new Date(lastCycleAt).toLocaleTimeString()}`
+          : " · no cycle yet"}
       </p>
       <Textarea
         value={note}
@@ -531,7 +700,12 @@ export function ReviewPane({
           <Check />
           Accept
         </Button>
-        <Button size="sm" variant="outline" disabled={busy} onClick={() => onReview("question")}>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={busy}
+          onClick={() => onReview("question")}
+        >
           <HelpCircle />
           Question
         </Button>

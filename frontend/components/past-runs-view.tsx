@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { alarmsOldestFirst } from "@/components/monitor-panes";
 import { browserGet, type SimulationRunDetail, type SimulationRunSummary } from "@/lib/browser-api";
 
 function fmtTime(value: string) {
@@ -31,6 +32,11 @@ export function PastRunsView() {
       .then((row) => setDetail(row))
       .catch(() => setDetail(null));
   }, [selected]);
+
+  const archivedAlarms = useMemo(
+    () => (detail ? alarmsOldestFirst(detail.alarms) : []),
+    [detail],
+  );
 
   return (
     <div className="mx-auto max-w-3xl space-y-4">
@@ -92,7 +98,7 @@ export function PastRunsView() {
               <div>
                 <h3 className="mb-2 text-sm font-medium">Alarm log</h3>
                 <ul className="space-y-2 font-mono text-xs">
-                  {detail.alarms.map((row) => (
+                  {archivedAlarms.map((row) => (
                     <li key={`${row.id}-${row.tick}`} className="rounded-md border border-border p-3">
                       <p>
                         {row.id} · {row.level} · tick {row.tick} · z {row.z.toFixed(2)}
@@ -101,7 +107,7 @@ export function PastRunsView() {
                       <p className="text-muted-foreground">{row.evidence}</p>
                     </li>
                   ))}
-                  {detail.alarms.length === 0 && (
+                  {archivedAlarms.length === 0 && (
                     <li className="text-muted-foreground">No alarms archived.</li>
                   )}
                 </ul>
