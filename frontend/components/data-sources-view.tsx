@@ -626,7 +626,7 @@ export function DataSourcesView() {
             : streams.length === 0
               ? "Add sources, then play from the sidebar"
               : finished
-                ? "Stream ended. Reset to play again"
+                ? "Stream ended — press Play to restart"
                 : "Simulation progress is kept when you pause"}
         </span>
       </div>

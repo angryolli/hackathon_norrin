@@ -94,14 +94,20 @@ class AppState:
         self.replays = []
 
     def _configured_specs(self) -> list[dict]:
+        """Sources that participate in the live tick loop.
+
+        A source must declare at least one y-column (a telemetry channel). An
+        x-axis alone is not enough — otherwise a huge CSV like te_process with
+        only `faultNumber` selected would keep the runner going after shorter
+        telemetry CSVs have already ended.
+        """
         out: list[dict] = []
         for row in self.store.list_data_sources():
             origin = row.get("origin") or "file"
             if origin not in ("api", "file"):
                 continue
-            x_column = str(row.get("x_column") or "").strip()
-            y_columns = row.get("y_columns") or []
-            if not x_column and not y_columns:
+            y_columns = [col for col in (row.get("y_columns") or []) if col]
+            if not y_columns:
                 continue
             try:
                 self._csv_path(row)
@@ -182,8 +188,9 @@ class AppState:
         self._persist_simulation()
 
     def finished(self) -> bool:
-        """Every open replay has reached end of file."""
-        return bool(self.replays) and all(replay.exhausted for replay in self.replays)
+        """Every open telemetry replay has reached end of file."""
+        active = [replay for replay in self.replays if replay.numeric_cols]
+        return bool(active) and all(replay.exhausted for replay in active)
 
     def _rewind_all(self) -> None:
         if not self.replays:
@@ -200,13 +207,19 @@ class AppState:
         if playing:
             if not self.replays:
                 self._open_replays(resume=True)
+            # Drop any leftover x-axis-only runners from older sessions.
+            self.replays = [replay for replay in self.replays if replay.numeric_cols]
+            was_finished = self.finished()
             for spec in self._configured_specs():
                 self._attach_replay(spec)
-            if self.finished():
-                # End of the x-axis is terminal. Reset is the only way back.
+            self.replays = [replay for replay in self.replays if replay.numeric_cols]
+            if not self.replays:
                 self.playing = False
             else:
-                self.playing = bool(self.replays)
+                if was_finished:
+                    # EOF is a stop, not a lock — Play rewinds and starts again.
+                    self._rewind_all()
+                self.playing = True
         else:
             self.playing = False
         self._monitor_key = None
@@ -464,16 +477,24 @@ class AppState:
         tick = 0
         advanced = False
         for replay in self.replays:
+            if not replay.numeric_cols:
+                continue
             before = replay.tick
             replay.emit()
             if replay.tick > before:
                 advanced = True
             tick = max(tick, replay.tick)
+            # Only live (still-advancing or not-yet-exhausted) channels feed the
+            # detector. Stale last values from an exhausted CSV must not keep
+            # pumping the engine after the file has ended.
+            if replay.exhausted and replay.tick == before:
+                continue
             for col, value in replay.latest_values().items():
                 values[f"{replay.source_id}::{col}"] = value
         if not advanced:
             for replay in self.replays:
-                replay.exhausted = True
+                if replay.numeric_cols:
+                    replay.exhausted = True
             self.playing = False
             self._monitor_key = None
             self._persist_simulation()
@@ -513,7 +534,8 @@ class AppState:
         self._persist_simulation()
 
     def monitor(self) -> MonitorSnapshot:
-        tick = self.replays[0].tick if self.replays else 0
+        telemetry = [replay for replay in self.replays if replay.numeric_cols]
+        tick = max((replay.tick for replay in telemetry), default=0)
         key = (
             self.dataset_id,
             tick,

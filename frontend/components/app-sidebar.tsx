@@ -142,22 +142,17 @@ export function AppSidebar() {
             variant={playing ? "secondary" : "default"}
             className={cn("w-full", !folded && "justify-start gap-2")}
             onClick={() => void togglePlay().catch(() => undefined)}
-            disabled={finished && !playing}
-            aria-label={
-              playing ? "Pause" : finished ? "Ended — reset to play" : "Play"
-            }
+            aria-label={playing ? "Pause" : "Play"}
             title={
               playing
                 ? "Pause"
                 : finished
-                  ? "Stream ended. Reset on Telemetry to play again."
+                  ? "Stream ended — press Play to restart from the top"
                   : "Play"
             }
           >
             {playing ? <Pause /> : <Play />}
-            <span className={cn(folded && "hidden")}>
-              {playing ? "Pause" : finished ? "Ended" : "Play"}
-            </span>
+            <span className={cn(folded && "hidden")}>{playing ? "Pause" : "Play"}</span>
           </Button>
           <SimulationSpeedometer compact={folded} />
         </div>

@@ -110,7 +110,6 @@ export function SimulationProvider({ children }: { children: React.ReactNode }) 
   }, []);
 
   const togglePlay = useCallback(async () => {
-    if (finished && !playing) return;
     const snap = await browserPost<MonitorSnapshot>("/stream/control", {
       playing: !playing,
     });
@@ -119,7 +118,7 @@ export function SimulationProvider({ children }: { children: React.ReactNode }) 
     if (snap.ticks_per_second != null) {
       setTicksPerSecondState(clampRate(snap.ticks_per_second));
     }
-  }, [finished, playing]);
+  }, [playing]);
 
   const setTicksPerSecond = useCallback(async (rate: number) => {
     const next = clampRate(rate);
