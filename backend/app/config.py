@@ -36,7 +36,7 @@ TICK_SECONDS = float(os.getenv("STREAM_TICK_SECONDS", "0.45"))
 # Default rate the UI and stream loop start from. Overridable at runtime.
 DEFAULT_TICKS_PER_SECOND = round(1.0 / max(TICK_SECONDS, 1e-3), 2)
 MIN_TICKS_PER_SECOND = 0.5
-MAX_TICKS_PER_SECOND = 20.0
+MAX_TICKS_PER_SECOND = 50.0
 LIVE_BUFFER = int(os.getenv("LIVE_BUFFER", "400"))
 SPARKLINE_POINTS = 100
 MAX_ARTIFACT_BYTES = 20_000

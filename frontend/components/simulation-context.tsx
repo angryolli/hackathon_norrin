@@ -11,7 +11,7 @@ import {
 
 const DEFAULT_TPS = 2.22;
 export const MIN_TICKS_PER_SECOND = 0.5;
-export const MAX_TICKS_PER_SECOND = 20;
+export const MAX_TICKS_PER_SECOND = 50;
 
 type SimulationContextValue = {
   playing: boolean;

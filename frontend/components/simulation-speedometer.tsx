@@ -7,7 +7,7 @@ import {
 } from "@/components/simulation-context";
 import { cn } from "@/lib/utils";
 
-const PRESETS = [1, 2, 5, 10, 20] as const;
+const PRESETS = [1, 2, 5, 10, 20, 50] as const;
 
 function nextPreset(current: number) {
   const idx = PRESETS.findIndex((v) => v > current + 0.01);
@@ -49,12 +49,12 @@ export function SimulationSpeedometer({ compact = false }: { compact?: boolean }
         }}
       >
         <svg
-          viewBox="0 0 120 72"
+          viewBox="0 0 120 88"
           className="h-auto w-full text-muted-foreground"
           aria-hidden
         >
           <path
-            d="M 12 60 A 48 48 0 0 1 108 60"
+            d="M 12 52 A 48 48 0 0 1 108 52"
             fill="none"
             stroke="currentColor"
             strokeWidth="8"
@@ -62,7 +62,7 @@ export function SimulationSpeedometer({ compact = false }: { compact?: boolean }
             opacity={0.25}
           />
           <path
-            d="M 12 60 A 48 48 0 0 1 108 60"
+            d="M 12 52 A 48 48 0 0 1 108 52"
             fill="none"
             stroke="currentColor"
             strokeWidth="8"
@@ -71,37 +71,51 @@ export function SimulationSpeedometer({ compact = false }: { compact?: boolean }
             strokeDasharray={`${Math.max(2, ratio * 100)} 100`}
             className={playing ? "text-foreground" : "text-muted-foreground"}
           />
-          <g transform={`rotate(${angle} 60 60)`}>
+          <g transform={`rotate(${angle} 60 52)`}>
             <line
               x1="60"
-              y1="60"
+              y1="52"
               x2="60"
-              y2="22"
+              y2="14"
               stroke="currentColor"
               strokeWidth="2.5"
               strokeLinecap="round"
               className="text-foreground"
             />
-            <circle cx="60" cy="60" r="3.5" className="fill-foreground" />
+            <circle cx="60" cy="52" r="3.5" className="fill-foreground" />
           </g>
-        </svg>
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 text-center">
-          <p
-            className={cn(
-              "font-mono leading-none text-foreground",
-              compact ? "text-[9px]" : "text-sm",
-            )}
+          <text
+            x="60"
+            y="68"
+            textAnchor="middle"
+            className="fill-foreground"
+            style={{
+              fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+              fontSize: compact ? 11 : 14,
+              fontWeight: 500,
+            }}
           >
             {label}
-          </p>
+          </text>
           {!compact && (
-            <p className="mt-0.5 font-mono text-[10px] text-muted-foreground">ticks/s</p>
+            <text
+              x="60"
+              y="80"
+              textAnchor="middle"
+              className="fill-muted-foreground"
+              style={{
+                fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                fontSize: 9,
+              }}
+            >
+              ticks/s
+            </text>
           )}
-        </div>
+        </svg>
       </button>
 
       {!compact && (
-        <label className="mt-2 block space-y-1">
+        <label className="mt-1 block space-y-1">
           <span className="sr-only">Simulation rate in ticks per second</span>
           <input
             type="range"
