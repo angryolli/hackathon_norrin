@@ -31,11 +31,11 @@ Demo scheduler: launch runs **one cycle** then stops (no token burn). Continuous
 
 | Expected output | Owner | Where you look |
 |---|---|---|
-| 1 Sensor understanding report | System agent | Telemetry → click a source |
-| 2 Data quality checks | System agent | Telemetry → click a source (that field only) |
-| 3 Drift / anomaly | Compute plane + system narration | System Dashboard → Alerts (inspect stream on Telemetry) |
-| 4 Root-cause diagnosis | System agent (+ critique) | System Dashboard → Root cause |
-| 5 Human review | Operator (controls) | System Dashboard → Judgment; questions also `/agent` |
+| Sensor understanding | System agent | System Dashboard (top) + Reports & Logs |
+| Data quality checks | System agent | System Dashboard → Quality + Reports & Logs |
+| Drift / anomaly | Compute plane + system narration | System Dashboard → Alarms |
+| Root-cause diagnosis | System agent (+ critique) | System Dashboard → Alarms |
+| Understanding / quality fields | System agent → decision log | Reports & Logs (Understanding, Quality checks, Decision log) |
 | 6 Decision log | Both (model calls + overrides) | Reports & Logs → Current decision log; past runs after reset |
 | 7 Adaptability | Architecture (unlabeled columns, source `kind`) | Reports & Logs → Data flow |
 | 8 Data-flow record | Node LLM layer | Reports & Logs → Data flow |

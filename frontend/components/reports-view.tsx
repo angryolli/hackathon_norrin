@@ -1,9 +1,10 @@
 "use client";
 
-import { ArrowLeftRight, Bell, History, ScrollText } from "lucide-react";
+import { ArrowLeftRight, Bell, Brain, History, ScrollText, ShieldCheck } from "lucide-react";
 import { useEffect, useState } from "react";
 import { AlarmLogView } from "@/components/alarm-log-view";
 import { AuditView } from "@/components/audit-view";
+import { FieldReportsView } from "@/components/field-reports-view";
 import { PastRunsView } from "@/components/past-runs-view";
 import {
   FlowPane,
@@ -13,10 +14,10 @@ import {
 } from "@/components/monitor-panes";
 import { useSimulation } from "@/components/simulation-context";
 
-type Panel = "alarms" | "log" | "history" | "flow";
+type Panel = "understanding" | "quality" | "alarms" | "log" | "history" | "flow";
 
 export function ReportsView() {
-  const [panel, setPanel] = useState<Panel>("alarms");
+  const [panel, setPanel] = useState<Panel>("understanding");
   const [systemAgent, setSystemAgent] = useState<SystemAgentStatus>(IDLE_AGENT);
   const { resetRevision } = useSimulation();
 
@@ -40,6 +41,25 @@ export function ReportsView() {
   return (
     <div className="flex h-full min-h-0">
       <div className="min-h-0 min-w-0 flex-1 overflow-y-auto p-4">
+        {panel === "understanding" && (
+          <div className="mx-auto max-w-3xl">
+            <h2 className="mb-3 text-sm font-medium">Sensor understanding report</h2>
+            <p className="mb-3 text-sm text-muted-foreground">
+              Inferred identity, role, evidence, and confidence for each channel in the current run.
+              Logged automatically when the system agent completes understanding.
+            </p>
+            <FieldReportsView key={`u-${resetRevision}`} mode="understanding" />
+          </div>
+        )}
+        {panel === "quality" && (
+          <div className="mx-auto max-w-3xl">
+            <h2 className="mb-3 text-sm font-medium">Data quality checks</h2>
+            <p className="mb-3 text-sm text-muted-foreground">
+              Per-channel quality assessment and DATA_TRUSTED gate for the current run.
+            </p>
+            <FieldReportsView key={`q-${resetRevision}`} mode="quality" />
+          </div>
+        )}
         {panel === "alarms" && (
           <div className="mx-auto max-w-3xl">
             <h2 className="mb-3 text-sm font-medium">Current alarm log</h2>
@@ -53,9 +73,9 @@ export function ReportsView() {
         )}
         {panel === "log" && (
           <div className="mx-auto max-w-3xl">
-            <h2 className="mb-3 text-sm font-medium">Current decision log</h2>
+            <h2 className="mb-3 text-sm font-medium">Decision log</h2>
             <p className="mb-3 text-sm text-muted-foreground">
-              Operator actions, model calls, and overrides for the active run.
+              Model calls, inference payloads, flags, and diagnoses for the current run.
             </p>
             <div className="overflow-hidden rounded-xl border border-border bg-card">
               <AuditView key={resetRevision} />
@@ -72,12 +92,22 @@ export function ReportsView() {
         </div>
         <nav className="flex flex-1 flex-col gap-1 overflow-y-auto p-2">
           <NavButton
+            item={{ id: "understanding", label: "Understanding", icon: Brain }}
+            active={panel === "understanding"}
+            onClick={() => setPanel("understanding")}
+          />
+          <NavButton
+            item={{ id: "quality", label: "Quality checks", icon: ShieldCheck }}
+            active={panel === "quality"}
+            onClick={() => setPanel("quality")}
+          />
+          <NavButton
             item={{ id: "alarms", label: "Current alarms", icon: Bell }}
             active={panel === "alarms"}
             onClick={() => setPanel("alarms")}
           />
           <NavButton
-            item={{ id: "log", label: "Current decision log", icon: ScrollText }}
+            item={{ id: "log", label: "Decision log", icon: ScrollText }}
             active={panel === "log"}
             onClick={() => setPanel("log")}
           />

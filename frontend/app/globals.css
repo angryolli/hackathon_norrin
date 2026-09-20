@@ -133,3 +133,17 @@
   backface-visibility: hidden;
   will-change: transform;
 }
+
+@keyframes source-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgb(52 211 153 / 0);
+  }
+  50% {
+    box-shadow: 0 10px 28px -8px rgb(52 211 153 / 0.45);
+  }
+}
+
+.source-emitting {
+  animation: source-pulse 2.4s ease-in-out infinite;
+}

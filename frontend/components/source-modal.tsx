@@ -7,34 +7,15 @@ import { StreamChart, type ChartMark } from "@/components/stream-chart";
 import { cn } from "@/lib/utils";
 import type { FieldCard } from "@/lib/browser-api";
 import type { SensorNote } from "@/components/monitor-panes";
+import { noteForField, SensorIntelCard } from "@/components/sensor-intel-card";
 
 type Origin = { left: number; top: number; width: number; height: number };
-
-const SCALE = ["Untrusted", "Poor", "Fair", "Good", "Excellent"] as const;
-
-const SCALE_COLOR = {
-  Untrusted: { bar: "bg-red-400", dim: "bg-red-400/20", text: "text-red-300" },
-  Poor: { bar: "bg-orange-400", dim: "bg-orange-400/20", text: "text-orange-300" },
-  Fair: { bar: "bg-amber-400", dim: "bg-amber-400/20", text: "text-amber-300" },
-  Good: { bar: "bg-lime-400", dim: "bg-lime-400/20", text: "text-lime-300" },
-  Excellent: { bar: "bg-emerald-400", dim: "bg-emerald-400/20", text: "text-emerald-300" },
-} as const;
-
-function adjectiveIndex(value: string) {
-  const i = SCALE.findIndex((row) => row.toLowerCase() === value.toLowerCase());
-  return i >= 0 ? i : 2;
-}
 
 export function noteForStream(
   sensors: Record<string, SensorNote> | undefined,
   stream: FieldCard,
 ): SensorNote | null {
-  if (!sensors) return null;
-  const key = `${stream.source_id ?? ""}::${stream.field_id}`;
-  if (sensors[key]) return sensors[key];
-  if (sensors[stream.field_id]) return sensors[stream.field_id];
-  const hit = Object.entries(sensors).find(([id]) => id.endsWith(`::${stream.field_id}`));
-  return hit?.[1] ?? null;
+  return noteForField(sensors, stream.source_id ?? "", stream.field_id);
 }
 
 export function SourceModal({
@@ -85,10 +66,6 @@ export function SourceModal({
   const box = open
     ? { left: targetLeft, top: targetTop, width: targetW }
     : { left: origin.left, top: origin.top, width: origin.width };
-  const understanding = note?.understanding;
-  const quality = note?.quality;
-  const adj = quality?.adjective ?? "Fair";
-  const adjI = adjectiveIndex(adj);
 
   return (
     <div className="fixed inset-0 z-[210]">
@@ -141,103 +118,17 @@ export function SourceModal({
           </div>
           <div
             className={cn(
-              "mt-4 space-y-4 transition-opacity duration-300 delay-100",
+              "mt-4 transition-opacity duration-300 delay-100",
               open ? "opacity-100" : "opacity-0",
             )}
           >
-            <section className="space-y-1">
-              <h3 className="text-xs tracking-wide text-muted-foreground uppercase">
-                Understanding
-              </h3>
-              {understanding ? (
-                <div className="space-y-1 text-sm">
-                  <p>
-                    <span className="text-muted-foreground">Role </span>
-                    {understanding.role}
-                    {understanding.hypothesis ? ` · ${understanding.hypothesis}` : ""}
-                  </p>
-                  {understanding.evidence && (
-                    <p className="font-mono text-xs text-muted-foreground">
-                      {understanding.evidence}
-                    </p>
-                  )}
-                  <p className="font-mono text-[11px] text-muted-foreground">
-                    confidence {(understanding.confidence * 100).toFixed(0)}%
-                  </p>
-                  {understanding.inferred && (
-                    <p>
-                      <span className="text-muted-foreground">Inferred </span>
-                      {understanding.inferred}
-                    </p>
-                  )}
-                  {understanding.assumed && (
-                    <p>
-                      <span className="text-muted-foreground">Assumed </span>
-                      {understanding.assumed}
-                    </p>
-                  )}
-                  {understanding.uncertain && (
-                    <p>
-                      <span className="text-muted-foreground">Uncertain </span>
-                      {understanding.uncertain}
-                    </p>
-                  )}
-                </div>
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  Launch the system agent to classify this source.
-                </p>
-              )}
-            </section>
-            <section className="space-y-2">
-              <h3 className="text-xs tracking-wide text-muted-foreground uppercase">Quality</h3>
-              {quality ? (
-                <div className="space-y-2 text-sm">
-                  <p>
-                    {quality.faulty ? "This sensor looks faulty." : "This sensor does not look faulty."}
-                    {quality.issue && quality.issue !== "none" ? ` ${quality.issue}.` : ""}
-                  </p>
-                  <div>
-                    <div className="flex items-center justify-between gap-2">
-                      <span className={SCALE_COLOR[SCALE[adjI]].text}>{quality.adjective}</span>
-                      <span className="font-mono text-[11px] text-muted-foreground">
-                        {(quality.confidence * 100).toFixed(0)}%
-                      </span>
-                    </div>
-                    <div className="mt-1 flex gap-1">
-                      {SCALE.map((label, index) => (
-                        <span
-                          key={label}
-                          title={label}
-                          className={cn(
-                            "h-1.5 flex-1 rounded-full",
-                            index <= adjI ? SCALE_COLOR[label].bar : SCALE_COLOR[label].dim,
-                          )}
-                        />
-                      ))}
-                    </div>
-                    <p className="mt-1 flex flex-wrap font-mono text-[10px]">
-                      {SCALE.map((label, index) => (
-                        <span key={label}>
-                          <span className={SCALE_COLOR[label].text}>{label}</span>
-                          {index < SCALE.length - 1 ? (
-                            <span className="text-muted-foreground"> · </span>
-                          ) : null}
-                        </span>
-                      ))}
-                    </p>
-                  </div>
-                  {quality.summary && (
-                    <p className="text-muted-foreground">{quality.summary}</p>
-                  )}
-                </div>
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  Launch the system agent to judge this sensor&apos;s quality. This is not a process
-                  alarm.
-                </p>
-              )}
-            </section>
+            <SensorIntelCard
+              sourceId={stream.source_id ?? ""}
+              fieldId={stream.field_id}
+              sourceFile={stream.source_file}
+              note={note}
+              embedded
+            />
           </div>
         </div>
       </div>

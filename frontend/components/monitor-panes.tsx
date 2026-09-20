@@ -159,6 +159,7 @@ export function ReportPane({
   running,
   badge,
   badgeTone,
+  hideTitle = false,
 }: {
   title: string;
   blurb: string;
@@ -166,18 +167,26 @@ export function ReportPane({
   running: boolean;
   badge?: string | null;
   badgeTone?: "ok" | "bad";
+  hideTitle?: boolean;
 }) {
   return (
-    <div className="mx-auto max-w-3xl space-y-3">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h2 className="text-sm font-medium">{title}</h2>
-          <p className="mt-1 text-sm text-muted-foreground">{blurb}</p>
+    <div className="space-y-3">
+      {!hideTitle && (
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-medium">{title}</h3>
+            <p className="mt-1 text-sm text-muted-foreground">{blurb}</p>
+          </div>
+          {badge && (
+            <Badge variant={badgeTone === "bad" ? "destructive" : "secondary"}>{badge}</Badge>
+          )}
         </div>
-        {badge && (
+      )}
+      {hideTitle && badge && (
+        <div className="flex justify-end">
           <Badge variant={badgeTone === "bad" ? "destructive" : "secondary"}>{badge}</Badge>
-        )}
-      </div>
+        </div>
+      )}
       {running && <p className="font-mono text-xs text-muted-foreground">Writing this report…</p>}
       {report ? (
         <div className="rounded-xl border border-border bg-card p-4">
@@ -214,37 +223,41 @@ export function DriftPane({
   open,
   setOpen,
   onAsk,
+  hideHeader = false,
 }: {
   current: DiagnosisSnapshot["current"] | null;
   signals: DiagnosisSignal[];
   open: string | null;
   setOpen: (id: string | null) => void;
   onAsk: (id: string) => void;
+  hideHeader?: boolean;
 }) {
   const k = current?.k ?? 6;
   const zYellow = current?.z_yellow ?? 4;
   const zRed = current?.z_red ?? 6;
 
   return (
-    <div className="mx-auto max-w-3xl space-y-3">
-      <div>
-        <h2 className="text-sm font-medium">Alarms</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Rolling z-score detector: each channel is scored against its own expanding mean and sd.
-          Yellow opens after {k} consecutive samples with some channel past {fmt(zYellow)}σ; red
-          needs {k} consecutive samples past {fmt(zRed)}σ. The score on each alarm is that
-          consecutive count; |z| is the peak deviation on the opening tick.
-        </p>
-        <p className="mt-1 font-mono text-xs text-muted-foreground">
-          {current
-            ? `live · tick ${current.tick} · max|z|=${fmt(current.z)} · score ${fmt(current.score)}/${k} · ${
-                current.calibrated
-                  ? "calibrated"
-                  : `warming up (first ${current.burn_in ?? 20} samples)`
-              }`
-            : "Waiting for the stream."}
-        </p>
-      </div>
+    <div className="space-y-3">
+      {!hideHeader && (
+        <div>
+          <h2 className="text-sm font-medium">Alarms</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Rolling z-score detector: each channel is scored against its own expanding mean and sd.
+            Yellow opens after {k} consecutive samples with some channel past {fmt(zYellow)}σ; red
+            needs {k} consecutive samples past {fmt(zRed)}σ. The score on each alarm is that
+            consecutive count; |z| is the peak deviation on the opening tick.
+          </p>
+        </div>
+      )}
+      <p className="font-mono text-xs text-muted-foreground">
+        {current
+          ? `live · tick ${current.tick} · max|z|=${fmt(current.z)} · score ${fmt(current.score)}/${k} · ${
+              current.calibrated
+                ? "calibrated"
+                : `warming up (first ${current.burn_in ?? 20} samples)`
+            }`
+          : "Waiting for the stream."}
+      </p>
 
       {signals.length === 0 ? (
         <p className="rounded-xl border border-border bg-card px-4 py-6 text-sm text-muted-foreground">
@@ -400,6 +413,7 @@ export function ReviewPane({
   busy,
   msg,
   onReview,
+  hideHeader = false,
 }: {
   eventId: string | null;
   lastCycleAt: string | null;
@@ -408,17 +422,20 @@ export function ReviewPane({
   busy: boolean;
   msg: string | null;
   onReview: (action: "accept" | "question" | "override") => void;
+  hideHeader?: boolean;
 }) {
   return (
-    <div className="mx-auto max-w-3xl space-y-4">
-      <div>
-        <h2 className="text-sm font-medium">Judgment</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Accept, question, or override the latest system conclusion. Everything on this dashboard
-          is in front of you. Questions open the operator chat. Every action is written to the
-          decision log.
-        </p>
-      </div>
+    <div className="space-y-4">
+      {!hideHeader && (
+        <div>
+          <h2 className="text-sm font-medium">Judgment</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Accept, question, or override the latest system conclusion. Everything on this dashboard
+            is in front of you. Questions open the operator chat. Every action is written to the
+            decision log.
+          </p>
+        </div>
+      )}
       <p className="font-mono text-xs text-muted-foreground">
         target {eventId ?? "system:diagnosis"}
         {lastCycleAt ? ` · last cycle ${new Date(lastCycleAt).toLocaleTimeString()}` : " · no cycle yet"}

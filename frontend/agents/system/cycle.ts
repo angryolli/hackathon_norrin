@@ -97,7 +97,11 @@ export async function runSystemCycle(sink: CycleSink) {
   sink.mergeSensors(understoodPatch);
   await postDecisionLog({
     type: "inference",
-    payload: { step: "understanding", hash: payloadHash(understanding) },
+    payload: {
+      step: "understanding",
+      hash: payloadHash(understanding),
+      fields: Object.values(understood),
+    },
     evidence_ref: "system:understanding",
   });
 
@@ -123,7 +127,12 @@ export async function runSystemCycle(sink: CycleSink) {
   sink.setDataTrusted(trusted);
   await postDecisionLog({
     type: "flag",
-    payload: { step: "quality", data_trusted: trusted, hash: payloadHash(quality) },
+    payload: {
+      step: "quality",
+      data_trusted: trusted,
+      hash: payloadHash(quality),
+      fields: Object.values(parsedQuality.fields),
+    },
     evidence_ref: "system:quality",
   });
 

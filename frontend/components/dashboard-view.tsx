@@ -3,45 +3,91 @@
 import { Bot, Pause } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { useEffect, useRef, useState } from "react";
+import { Button } from "@/components/ui/button";
 import { ChatMarkdown } from "@/components/chat-markdown";
+import { DashboardSection } from "@/components/dashboard-section";
+import { DashboardSourcesMap } from "@/components/dashboard-sources-map";
+import { SensorIntelGrid } from "@/components/sensor-intel-card";
+import { Badge } from "@/components/ui/badge";
 import {
   DriftPane,
-  fieldLabel,
   fmt,
   IDLE_AGENT,
   ReportPane,
-  ReviewPane,
   stepLabel,
-  telemetryHref,
   type SystemAgentStatus,
 } from "@/components/monitor-panes";
-import { browserPost, eventsStreamUrl } from "@/lib/browser-api";
+import { eventsStreamUrl, monitorStreamUrl, type MonitorSnapshot } from "@/lib/browser-api";
 import type { DiagnosisSignal, DiagnosisSnapshot } from "@/lib/pipeline";
-import { cn } from "@/lib/utils";
 import { useSimulation } from "@/components/simulation-context";
 
 export function DashboardView() {
   const router = useRouter();
+  const [snap, setSnap] = useState<MonitorSnapshot | null>(null);
   const [signals, setSignals] = useState<DiagnosisSignal[]>([]);
   const [current, setCurrent] = useState<DiagnosisSnapshot["current"] | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const [systemAgent, setSystemAgent] = useState<SystemAgentStatus>(IDLE_AGENT);
   const [systemAgentBusy, setSystemAgentBusy] = useState(false);
-  const [reviewNote, setReviewNote] = useState("");
-  const [reviewBusy, setReviewBusy] = useState(false);
-  const [reviewMsg, setReviewMsg] = useState<string | null>(null);
-  const { resetRevision } = useSimulation();
+  const { playing, finished, resetRevision } = useSimulation();
+  const monitorKey = useRef("");
 
   useEffect(() => {
+    setSnap(null);
     setSignals([]);
     setCurrent(null);
     setOpen(null);
-    setReviewNote("");
-    setReviewMsg(null);
     setSystemAgent(IDLE_AGENT);
+    monitorKey.current = "";
   }, [resetRevision]);
+
+  useEffect(() => {
+    let on = true;
+    let source: EventSource | null = null;
+
+    function apply(data: MonitorSnapshot) {
+      if (!on) return;
+      const key = [
+        data.tick,
+        data.playing,
+        data.finished,
+        (data.fields ?? []).map((f) => `${f.source_id}:${f.field_id}:${f.sparkline.length}`).join("|"),
+      ].join("#");
+      if (key === monitorKey.current) return;
+      monitorKey.current = key;
+      setSnap(data);
+    }
+
+    function connect() {
+      source?.close();
+      source = new EventSource(monitorStreamUrl());
+      source.addEventListener("snapshot", (event) => {
+        try {
+          apply(JSON.parse((event as MessageEvent<string>).data) as MonitorSnapshot);
+        } catch {
+          /* ignore */
+        }
+      });
+    }
+
+    function onVis() {
+      if (document.hidden) {
+        source?.close();
+        source = null;
+        return;
+      }
+      connect();
+    }
+
+    connect();
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      on = false;
+      document.removeEventListener("visibilitychange", onVis);
+      source?.close();
+    };
+  }, []);
 
   useEffect(() => {
     let on = true;
@@ -69,7 +115,7 @@ export function DashboardView() {
         try {
           apply(JSON.parse((event as MessageEvent<string>).data) as DiagnosisSnapshot);
         } catch {
-          /* ignore malformed frames */
+          /* ignore */
         }
       });
     }
@@ -143,75 +189,89 @@ export function DashboardView() {
     }
   }
 
-  async function review(action: "accept" | "question" | "override") {
-    setReviewBusy(true);
-    setReviewMsg(null);
-    try {
-      await browserPost("/decision-log/append", {
-        type: action === "accept" ? "diagnosis" : action,
-        payload: {
-          action,
-          note: reviewNote,
-          event_id: systemAgent.eventId,
-        },
-        evidence_ref: systemAgent.eventId ?? "system:diagnosis",
-        human_overridden: action === "override",
-      });
-      setReviewNote("");
-      setReviewMsg(
-        action === "accept"
-          ? "Accepted and logged."
-          : action === "question"
-            ? "Question logged. Ask the operator agent for the why."
-            : "Override logged.",
-      );
-      if (action === "question") router.push("/agent");
-    } catch (err) {
-      setReviewMsg(err instanceof Error ? err.message : "review failed");
-    } finally {
-      setReviewBusy(false);
-    }
-  }
-
-  const reds = signals.filter((row) => row.level === "red").length;
-  const yellows = signals.filter((row) => row.level === "yellow").length;
+  const fields = snap?.fields ?? [];
+  const tick = snap?.tick ?? current?.tick ?? 0;
+  const qualityBadge =
+    systemAgent.dataTrusted == null
+      ? null
+      : systemAgent.dataTrusted
+        ? "DATA_TRUSTED"
+        : "WITHHELD";
 
   return (
     <div className="flex h-full min-h-0">
       <div className="min-h-0 min-w-0 flex-1 overflow-y-auto p-4">
-        <div className="mx-auto max-w-3xl space-y-10">
-          <DriftPane
-            current={current}
+        <div className="mx-auto max-w-3xl space-y-8 pb-8">
+          <DashboardSourcesMap
+            fields={fields}
+            playing={playing}
+            finished={finished}
+            tick={tick}
             signals={signals}
-            open={open}
-            setOpen={setOpen}
-            onAsk={(id) => router.push(`/agent?context=signal_id=${id}`)}
           />
-          <div className="space-y-6">
-            <ReportPane
-              title="Root-cause diagnosis"
-              blurb="Fault type, ranked fields, and a plain-language walkthrough. A critique runs before this is treated as final."
-              report={systemAgent.diagnosis}
-              running={systemAgent.running && systemAgent.step === "diagnosis"}
-            />
-            {systemAgent.critique && (
-              <div>
-                <h3 className="mb-2 text-sm font-medium">Critique</h3>
-                <div className="rounded-xl border border-border bg-card p-4">
-                  <ChatMarkdown text={systemAgent.critique.text} />
-                </div>
+
+          <DashboardSection
+            title="Sensor understanding"
+            subtitle="Inferred identity and role for each channel. Full field records are in Reports & Logs."
+          >
+            <SensorIntelGrid fields={fields} sensors={systemAgent.sensors} mode="understanding" />
+          </DashboardSection>
+
+          <DashboardSection
+            title="Quality"
+            subtitle="Instrument health for the current run. Pass/fail gate before root cause."
+          >
+            {qualityBadge && (
+              <div className="flex justify-end">
+                <Badge variant={systemAgent.dataTrusted === false ? "destructive" : "secondary"}>
+                  {qualityBadge}
+                </Badge>
               </div>
             )}
-          </div>
-          <ReviewPane
-            eventId={systemAgent.eventId}
-            lastCycleAt={systemAgent.lastCycleAt}
-            note={reviewNote}
-            onNote={setReviewNote}
-            busy={reviewBusy}
-            msg={reviewMsg}
-            onReview={(action) => void review(action)}
-          />
+            <DashboardSection title="Data quality checks" variant="secondary">
+              <SensorIntelGrid fields={fields} sensors={systemAgent.sensors} mode="quality" />
+            </DashboardSection>
+          </DashboardSection>
+
+          <DashboardSection
+            title="Alarms"
+            subtitle="Live drift flags and root-cause diagnosis for the current run."
+          >
+            <DashboardSection
+              title="Drift & anomaly detection"
+              subtitle="Continuous monitoring output. Alarms reference the channels responsible."
+              variant="secondary"
+            >
+              <DriftPane
+                current={current}
+                signals={signals}
+                open={open}
+                setOpen={setOpen}
+                onAsk={(id) => router.push(`/agent?context=signal_id=${id}`)}
+                hideHeader
+              />
+            </DashboardSection>
+
+            <DashboardSection
+              title="Root-cause diagnosis"
+              subtitle="Fault type, ranked contributing sensors, and a plain-language walkthrough."
+              variant="secondary"
+            >
+              <ReportPane
+                title="Diagnosis"
+                blurb=""
+                report={systemAgent.diagnosis}
+                running={systemAgent.running && systemAgent.step === "diagnosis"}
+                hideTitle
+              />
+              {systemAgent.critique && (
+                <div className="rounded-xl border border-border bg-card p-4">
+                  <h3 className="mb-2 text-sm font-medium">Critique</h3>
+                  <ChatMarkdown text={systemAgent.critique.text} />
+                </div>
+              )}
+            </DashboardSection>
+          </DashboardSection>
         </div>
       </div>
 
@@ -242,69 +302,32 @@ export function DashboardView() {
               ? stepLabel(systemAgent.step)
               : systemAgent.error
                 ? systemAgent.error
-                : "Manual cycle · not 24/7"}
+                : "Manual cycle · understanding, quality, diagnosis"}
           </p>
         </div>
-        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3">
-          <div>
-            <p className="text-xs font-medium text-foreground">Alarms</p>
-            <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
-              Score = consecutive hot samples past 4σ / 6σ. |z| = peak deviation when the alarm
-              opened.
-            </p>
-          </div>
-          <p className="font-mono text-[11px] text-muted-foreground">
-            {yellows} yellow · {reds} red
+        <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-3 text-[11px] text-muted-foreground">
+          <p>
+            {signals.filter((row) => row.level === "yellow").length} yellow ·{" "}
+            {signals.filter((row) => row.level === "red").length} red
           </p>
-          {signals.length === 0 ? (
-            <p className="text-[11px] text-muted-foreground">No alarms in the log yet.</p>
-          ) : (
-            <ul className="space-y-2">
-              {signals.slice(0, 12).map((row) => {
-                const top = row.top_fields[0];
-                const href = top ? telemetryHref(top.field_id) : "/telemetry";
-                const label = top ? fieldLabel(top.field_id) : row.id;
-                return (
-                  <li key={row.id} className="rounded-lg border border-border bg-card px-2 py-2">
-                    <p className="font-mono text-[10px]">
-                      <span
-                        className={
-                          row.level === "red" ? "text-red-300" : "text-amber-300"
-                        }
-                      >
-                        {row.level}
-                      </span>
-                      <span className="text-muted-foreground">
-                        {" "}
-                        · t{row.tick} · score {fmt(row.score)} · |z| {fmt(row.z)}
-                      </span>
-                    </p>
-                    <p className="mt-0.5 truncate font-mono text-[10px] text-foreground">
-                      {label}
-                    </p>
-                    <Link
-                      href={href}
-                      className={cn(
-                        buttonVariants({ variant: "ghost", size: "sm" }),
-                        "mt-1 h-6 px-1 text-[10px]",
-                      )}
-                    >
-                      View source
-                    </Link>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-          <p className="font-mono text-[10px] text-muted-foreground">
+          <p>
+            {fields.length} source{fields.length === 1 ? "" : "s"} · tick {tick}
+          </p>
+          <p>
             {systemAgent.lastCycleAt
               ? `last cycle ${new Date(systemAgent.lastCycleAt).toLocaleTimeString()}`
-              : "no cycle yet"}
+              : "no agent cycle yet"}
           </p>
+          <Link href="/reports" className="underline-offset-2 hover:underline">
+            Field reports in Reports & Logs
+          </Link>
+          <Link href="/telemetry" className="underline-offset-2 hover:underline">
+            Inspect streams on Telemetry
+          </Link>
         </div>
         <div className="border-t border-border px-3 py-3 font-mono text-[10px] text-muted-foreground">
           {current
-            ? `tick ${current.tick} · z=${fmt(current.z)} · ${
+            ? `max|z|=${fmt(current.z)} · ${
                 current.calibrated ? "calibrated" : "warming up"
               }`
             : "Waiting for stream"}
