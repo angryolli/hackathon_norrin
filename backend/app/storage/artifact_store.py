@@ -607,6 +607,30 @@ class ArtifactStore:
                 session.delete(row)
             session.commit()
 
+    def clear_diagnosis_for_sources(self, source_ids: set[str]) -> int:
+        """Delete live alarms whose top channels belong to the given sources."""
+        if not source_ids:
+            return 0
+        removed = 0
+        with self._lock, self._session() as session:
+            rows = session.exec(select(DiagnosisSignalRecord)).all()
+            for row in rows:
+                try:
+                    fields = json.loads(row.top_fields or "[]")
+                except json.JSONDecodeError:
+                    fields = []
+                touched = {
+                    str(item.get("field_id") or "").split("::", 1)[0]
+                    for item in fields
+                    if isinstance(item, dict) and "::" in str(item.get("field_id") or "")
+                }
+                if touched & source_ids:
+                    session.delete(row)
+                    removed += 1
+            if removed:
+                session.commit()
+        return removed
+
     def clear_decision_log(self) -> None:
         with self._lock, self._session() as session:
             rows = session.exec(select(DecisionLogRecord)).all()

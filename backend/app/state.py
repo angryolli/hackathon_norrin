@@ -472,11 +472,15 @@ class AppState:
         for source_id in wanted:
             if not self.store.delete_data_source(source_id):
                 raise KeyError(source_id)
+        self.store.clear_diagnosis_for_sources(drop)
         ids = self._source_ids()
         if self.dataset_id in drop:
             self.dataset_id = ids[0] if ids else ""
         self._monitor_key = None
         self._persist_simulation()
+        self.signal_count = len(self.store.list_diagnosis(40))
+        if self.signal_count == 0:
+            self.last_signal_id = None
 
     def runtime_config(self) -> RuntimeConfig:
         return RuntimeConfig(
@@ -642,18 +646,38 @@ class AppState:
 
     def diagnosis_snapshot(self) -> dict:
         signals = self.store.list_diagnosis(40)
+        active = {replay.source_id for replay in self.replays if replay.numeric_cols}
+        if active:
+            # Drop alarms that belong to sources no longer in the live tick loop,
+            # so a previous CSV's yellow/red marks cannot haunt a new file.
+            signals = [
+                row
+                for row in signals
+                if self._signal_source_ids(row) & active
+            ]
         return {
             "signals": signals,
             "events": signals,
             "current": self.engine.current_snapshot(),
             "evidence": (
-                f"Rolling z-score, k={self.engine.detector.k} consecutive samples. Each channel is "
-                f"studentized against its own expanding mean/sd; yellow needs k samples in a row "
-                f"with some channel at |z| >= {self.engine.detector.yellow_z:g}, red at "
-                f"|z| >= {self.engine.detector.red_z:g}. Nothing fires in the first "
-                f"{self.engine.detector.burn_in} samples. No raw rows."
+                "Two detectors share this alarm log. (1) Rolling z-score k="
+                f"{self.engine.detector.k}: yellow after k consecutive samples with some "
+                f"channel at |z| >= {self.engine.detector.yellow_z:g}, red at "
+                f"|z| >= {self.engine.detector.red_z:g}. (2) v5 agnostic: expanding-moment "
+                "RMS, freeze streaks on xmeas_*, and amplitude envelope — gates ease from "
+                f"burn-in ({self.engine.detector.burn_in}) to sample 300. Plant level is the "
+                "max of both; either can open an alarm. No raw rows."
             ),
         }
+
+    @staticmethod
+    def _signal_source_ids(signal: dict) -> set[str]:
+        out: set[str] = set()
+        for field in signal.get("top_fields") or []:
+            field_id = str(field.get("field_id") or "")
+            if "::" in field_id:
+                out.add(field_id.split("::", 1)[0])
+        return out
 
     def events_snapshot(self) -> dict:
         return self.diagnosis_snapshot()

@@ -242,10 +242,11 @@ export function DriftPane({
         <div>
           <h2 className="text-sm font-medium">Alarms</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Rolling z-score detector: each channel is scored against its own expanding mean and sd.
-            Yellow opens after {k} consecutive samples with some channel past {fmt(zYellow)}σ; red
-            needs {k} consecutive samples past {fmt(zRed)}σ. The score on each alarm is that
-            consecutive count; |z| is the peak deviation on the opening tick.
+            Two detectors share this log. Rolling z-score: yellow after {k} consecutive samples past{" "}
+            {fmt(zYellow)}σ, red past {fmt(zRed)}σ. v5 agnostic: expanding-moment RMS, freeze streaks,
+            and amplitude envelope (gates ease after burn-in). Plant level is the max of both — either
+            can open an alarm. Score is the z-score streak when that model fires; |z| is the peak
+            deviation on the opening tick.
           </p>
         </div>
       )}

@@ -33,12 +33,14 @@ function parseSourceKey(key: string) {
 }
 
 function fieldHit(signalFieldId: string, stream: FieldCard) {
-  const key = `${stream.source_id ?? ""}::${stream.field_id}`;
-  return (
-    signalFieldId === key ||
-    signalFieldId === stream.field_id ||
-    signalFieldId.endsWith(`::${stream.field_id}`)
-  );
+  const sourceId = stream.source_id ?? "";
+  const fieldId = stream.field_id;
+  // Alarms are stored as `source_id::column`. Never match by bare column name —
+  // that paints one CSV's alarms onto every other source that shares xmeas_*.
+  if (sourceId) {
+    return signalFieldId === `${sourceId}::${fieldId}`;
+  }
+  return signalFieldId === fieldId || signalFieldId.endsWith(`::${fieldId}`);
 }
 
 function marksForStream(
