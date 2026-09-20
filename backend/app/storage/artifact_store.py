@@ -41,6 +41,7 @@ class ArtifactStore:
             conn.commit()
         SQLModel.metadata.create_all(self._engine)
         self._migrate_data_sources()
+        self._migrate_simulation_history()
 
     def _session(self) -> Session:
         return Session(self._engine, expire_on_commit=False)
@@ -59,6 +60,19 @@ class ArtifactStore:
             for col_name, ddl in additions.items():
                 if col_name not in names:
                     conn.execute(text(f"ALTER TABLE data_sources ADD COLUMN {col_name} {ddl}"))
+            conn.commit()
+
+    def _migrate_simulation_history(self) -> None:
+        with self._engine.connect() as conn:
+            rows = conn.execute(text("PRAGMA table_info(simulation_source_history)")).fetchall()
+            names = {row[1] for row in rows}
+            if names and "exhausted" not in names:
+                conn.execute(
+                    text(
+                        "ALTER TABLE simulation_source_history "
+                        "ADD COLUMN exhausted BOOLEAN DEFAULT 0"
+                    )
+                )
             conn.commit()
 
     def put(self, kind: str, key: str, payload: BaseModel | dict) -> None:
@@ -463,6 +477,7 @@ class ArtifactStore:
                             y_columns=json.dumps(y_columns if isinstance(y_columns, list) else []),
                             tick=int(item.get("tick") or 0),
                             file_offset=int(item.get("file_offset") or 0),
+                            exhausted=bool(item.get("exhausted")),
                             sparklines=json.dumps(sparklines if isinstance(sparklines, dict) else {}),
                             updated_at=now,
                         )
@@ -474,6 +489,7 @@ class ArtifactStore:
                     rec.y_columns = json.dumps(y_columns if isinstance(y_columns, list) else [])
                     rec.tick = int(item.get("tick") or 0)
                     rec.file_offset = int(item.get("file_offset") or 0)
+                    rec.exhausted = bool(item.get("exhausted"))
                     rec.sparklines = json.dumps(sparklines if isinstance(sparklines, dict) else {})
                     rec.updated_at = now
                     session.add(rec)
@@ -500,6 +516,7 @@ class ArtifactStore:
             "y_columns": [str(c) for c in y_columns],
             "tick": int(row.tick or 0),
             "file_offset": int(row.file_offset or 0),
+            "exhausted": bool(getattr(row, "exhausted", False)),
             "sparklines": {
                 str(col): [float(v) for v in values]
                 for col, values in sparklines.items()

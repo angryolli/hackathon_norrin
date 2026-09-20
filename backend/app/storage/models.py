@@ -83,6 +83,7 @@ class SimulationSourceHistoryRecord(SQLModel, table=True):
     y_columns: str = "[]"
     tick: int = 0
     file_offset: int = 0
+    exhausted: bool = False
     sparklines: str = "{}"
     updated_at: str = ""
 

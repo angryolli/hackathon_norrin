@@ -93,7 +93,7 @@ export function DataSourcesView() {
     height: number;
   } | null>(null);
   const ticksRef = useRef({ tick: -1, demo: -1, dataset: "", playing: false, fields: "" });
-  const { applySnapshot } = useSimulation();
+  const { applySnapshot, finished } = useSimulation();
   const searchParams = useSearchParams();
   const openedQuery = useRef(false);
 
@@ -125,6 +125,7 @@ export function DataSourcesView() {
       applySnapshot({
         playing: data.playing,
         ticks_per_second: data.ticks_per_second,
+        finished: data.finished,
       });
     }
 
@@ -398,6 +399,7 @@ export function DataSourcesView() {
     applySnapshot({
       playing: updated.playing,
       ticks_per_second: updated.ticks_per_second,
+      finished: updated.finished,
     });
   }
 
@@ -623,7 +625,9 @@ export function DataSourcesView() {
               : "Select y-axis sources to remove"
             : streams.length === 0
               ? "Add sources, then play from the sidebar"
-              : "Simulation progress is kept when you pause"}
+              : finished
+                ? "Stream ended. Reset to play again"
+                : "Simulation progress is kept when you pause"}
         </span>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-4">

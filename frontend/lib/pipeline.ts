@@ -27,6 +27,7 @@ export async function getConfig() {
     baseline_established: boolean;
     no_egress: boolean;
     playing?: boolean;
+    finished?: boolean;
   }>("/config");
 }
 

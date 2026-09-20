@@ -210,12 +210,23 @@ async def main() -> int:
 
         before = len(diagnosis["signals"])
         status, monitor = await asgi(app, "POST", "/stream/control", {"playing": True})
-        checks.ok("eof: play restarts from the top", monitor["tick"] == 0, f"tick {monitor['tick']}")
+        checks.ok(
+            "eof: play refused until reset",
+            monitor["playing"] is False and monitor.get("finished") is True,
+            f"playing={monitor.get('playing')} finished={monitor.get('finished')} tick={monitor.get('tick')}",
+        )
+        checks.ok("eof: play does not rewind", monitor["tick"] == 960, f"tick {monitor['tick']}")
+
+        status, monitor = await asgi(app, "POST", "/stream/reset", {})
+        checks.ok("eof: reset parks at tick 0", monitor["tick"] == 0, f"tick {monitor['tick']}")
+        checks.ok("eof: reset clears finished", monitor.get("finished") is False)
+        status, monitor = await asgi(app, "POST", "/stream/control", {"playing": True})
+        checks.ok("eof: play after reset starts from the top", monitor["tick"] == 0, f"tick {monitor['tick']}")
         status, diagnosis = await asgi(app, "GET", "/diagnosis")
         checks.ok(
-            "eof: restart clears the old run",
+            "eof: reset clears the old run",
             diagnosis["signals"] == [] and not diagnosis["current"]["calibrated"],
-            f"had {before} signals before restart",
+            f"had {before} signals before reset",
         )
 
         # ---------- clean run: must stay silent for its whole length ----------

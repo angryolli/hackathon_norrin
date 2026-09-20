@@ -35,7 +35,7 @@ export function AppSidebar() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [cfg, setCfg] = useState<RuntimeConfig | null>(null);
   const [sources, setSources] = useState<DataSource[]>([]);
-  const { playing, togglePlay } = useSimulation();
+  const { playing, finished, togglePlay } = useSimulation();
 
   useEffect(() => {
     setMounted(true);
@@ -142,11 +142,22 @@ export function AppSidebar() {
             variant={playing ? "secondary" : "default"}
             className={cn("w-full", !folded && "justify-start gap-2")}
             onClick={() => void togglePlay().catch(() => undefined)}
-            aria-label={playing ? "Pause" : "Play"}
-            title={playing ? "Pause" : "Play"}
+            disabled={finished && !playing}
+            aria-label={
+              playing ? "Pause" : finished ? "Ended — reset to play" : "Play"
+            }
+            title={
+              playing
+                ? "Pause"
+                : finished
+                  ? "Stream ended. Reset on Telemetry to play again."
+                  : "Play"
+            }
           >
             {playing ? <Pause /> : <Play />}
-            <span className={cn(folded && "hidden")}>{playing ? "Pause" : "Play"}</span>
+            <span className={cn(folded && "hidden")}>
+              {playing ? "Pause" : finished ? "Ended" : "Play"}
+            </span>
           </Button>
           <SimulationSpeedometer compact={folded} />
         </div>

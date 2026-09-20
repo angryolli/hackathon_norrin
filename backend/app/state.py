@@ -131,6 +131,7 @@ class AppState:
                     int(history.get("file_offset") or 0),
                     int(history.get("tick") or 0),
                     history.get("sparklines") or {},
+                    exhausted=bool(history.get("exhausted")),
                 )
             return replay
         except Exception:
@@ -174,7 +175,10 @@ class AppState:
         saved = self.store.get_simulation_state()
         self._open_replays(resume=True)
         want_play = bool(saved.get("playing"))
-        self.playing = bool(want_play and self.replays)
+        if self.finished():
+            self.playing = False
+        else:
+            self.playing = bool(want_play and self.replays)
         self._persist_simulation()
 
     def finished(self) -> bool:
@@ -199,9 +203,10 @@ class AppState:
             for spec in self._configured_specs():
                 self._attach_replay(spec)
             if self.finished():
-                # Play on a finished stream starts the run over, detector included.
-                self._rewind_all()
-            self.playing = bool(self.replays)
+                # End of the x-axis is terminal. Reset is the only way back.
+                self.playing = False
+            else:
+                self.playing = bool(self.replays)
         else:
             self.playing = False
         self._monitor_key = None
@@ -438,6 +443,7 @@ class AppState:
             demo_data_uri=str(demo_data_path() or ""),
             playing=self.playing,
             ticks_per_second=self.ticks_per_second,
+            finished=self.finished(),
         )
 
     def update_config(self, body: ConfigUpdate) -> RuntimeConfig:
@@ -466,9 +472,10 @@ class AppState:
             for col, value in replay.latest_values().items():
                 values[f"{replay.source_id}::{col}"] = value
         if not advanced:
-            if self.finished():
-                self.playing = False
-                self._monitor_key = None
+            for replay in self.replays:
+                replay.exhausted = True
+            self.playing = False
+            self._monitor_key = None
             self._persist_simulation()
             return
         if not values:
@@ -511,6 +518,7 @@ class AppState:
             self.dataset_id,
             tick,
             self.playing,
+            self.finished(),
             round(self.ticks_per_second, 3),
             self.last_signal_id,
             round(self.engine.latest_z, 3),
@@ -575,6 +583,7 @@ class AppState:
             demo_data_uri=str(demo_data_path() or ""),
             playing=self.playing,
             ticks_per_second=self.ticks_per_second,
+            finished=self.finished(),
         )
 
     def diagnosis_snapshot(self) -> dict:

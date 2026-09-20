@@ -39,6 +39,7 @@ class RuntimeConfig(BaseModel):
     demo_data_uri: str = ""
     playing: bool = False
     ticks_per_second: float = 2.0
+    finished: bool = False
 
 
 class ConfigUpdate(BaseModel):
@@ -343,6 +344,7 @@ class MonitorSnapshot(BaseModel):
     demo_data_uri: str = ""
     playing: bool = False
     ticks_per_second: float = 2.0
+    finished: bool = False
     evidence: str = "Monitor snapshot is aggregated windows, not raw row dumps."
 
 

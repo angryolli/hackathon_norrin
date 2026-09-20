@@ -83,7 +83,8 @@ export type MonitorSnapshot = {
   demo_data_uri?: string;
   playing?: boolean;
   ticks_per_second?: number;
-  evidence: string;
+  finished?: boolean;
+  evidence: str;
 };
 
 export type DataSourcePreview = {
@@ -119,6 +120,7 @@ export type RuntimeConfig = {
   demo_data_uri?: string;
   playing?: boolean;
   ticks_per_second?: number;
+  finished?: boolean;
 };
 
 export type ChatSummary = {

@@ -32,7 +32,8 @@ class DiskReplaySource:
     _numeric_idx: list[int] = field(default_factory=list)
     file_offset: int = 0
     exhausted: bool = False
-    """Set at end of file. The replay stops there rather than looping."""
+    """Set at end of file or when the x-axis column runs out. Replay does not loop."""
+    _x_idx: int | None = None
 
     def open(self, y_cols: list[str] | None = None, x_column: str = "") -> None:
         self.path = Path(self.path)
@@ -58,6 +59,7 @@ class DiskReplaySource:
             ]
         index = {name: i for i, name in enumerate(self._header)}
         self._numeric_idx = [index[col] for col in self.numeric_cols if col in index]
+        self._x_idx = index.get(self.x_column) if self.x_column else None
         self.sparklines = {col: deque(maxlen=SPARKLINE_POINTS) for col in self.numeric_cols}
         self.tick = 0
         self._rewind()
@@ -82,7 +84,36 @@ class DiskReplaySource:
         self.exhausted = False
         self.file_offset = self._tell()
 
-    def restore(self, offset: int, tick: int, sparklines: dict[str, list[float]]) -> None:
+    def _blank(self, row: list[str]) -> bool:
+        return not row or all(not str(cell).strip() for cell in row)
+
+    def _x_ended(self, row: list[str]) -> bool:
+        if self._x_idx is None:
+            return False
+        if self._x_idx >= len(row):
+            return True
+        return not str(row[self._x_idx]).strip()
+
+    def _next_data_row(self) -> list[str] | None:
+        """Next row that should become a tick. None when the x-axis or file has ended."""
+        reader = self._reader
+        if reader is None:
+            return None
+        while True:
+            row = next(reader, None)
+            if row is None or self._x_ended(row):
+                return None
+            if self._blank(row):
+                continue
+            return row
+
+    def restore(
+        self,
+        offset: int,
+        tick: int,
+        sparklines: dict[str, list[float]],
+        exhausted: bool = False,
+    ) -> None:
         """Replay-read `tick` rows from the header so the cursor matches paused progress."""
         with self.lock:
             for col, values in (sparklines or {}).items():
@@ -94,12 +125,16 @@ class DiskReplaySource:
                 )
             self._rewind()
             remaining = max(0, int(tick or 0))
-            while remaining > 0 and self._reader is not None:
-                if next(self._reader, None) is None:
+            consumed = 0
+            while remaining > 0:
+                if self._next_data_row() is None:
                     self.exhausted = True
                     break
                 remaining -= 1
-            self.tick = int(tick or 0)
+                consumed += 1
+            self.tick = consumed if self.exhausted else int(tick or 0)
+            if exhausted:
+                self.exhausted = True
             self.file_offset = int(offset or self._tell())
 
     def reset_progress(self) -> None:
@@ -118,6 +153,7 @@ class DiskReplaySource:
                 "y_columns": list(self.numeric_cols),
                 "tick": self.tick,
                 "file_offset": self.file_offset,
+                "exhausted": self.exhausted,
                 "sparklines": {
                     col: list(self.sparklines.get(col, ())) for col in self.numeric_cols
                 },
@@ -127,9 +163,10 @@ class DiskReplaySource:
         with self.lock:
             if self._reader is None or self.exhausted:
                 return
-            row = next(self._reader, None)
+            row = self._next_data_row()
             if row is None:
                 self.exhausted = True
+                self.file_offset = self._tell()
                 return
             for col, idx in zip(self.numeric_cols, self._numeric_idx):
                 if idx >= len(row):
