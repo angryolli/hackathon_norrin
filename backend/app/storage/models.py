@@ -70,7 +70,48 @@ class SimulationStateRecord(SQLModel, table=True):
     playing: bool = False
     tick: int = 0
     t2_history: str = "[]"
+    run_started_at: str = ""
     updated_at: str = ""
+
+
+class SimulationRunRecord(SQLModel, table=True):
+    __tablename__ = "simulation_runs"
+
+    id: str = Field(primary_key=True)
+    started_at: str = ""
+    ended_at: str = ""
+    tick: int = 0
+    finished: bool = False
+    sources_json: str = "[]"
+    alarm_count: int = 0
+    decision_count: int = 0
+
+
+class SimulationRunAlarmRecord(SQLModel, table=True):
+    __tablename__ = "simulation_run_alarms"
+
+    id: int | None = Field(default=None, primary_key=True)
+    run_id: str = Field(index=True, foreign_key="simulation_runs.id")
+    signal_id: str = ""
+    tick: int = 0
+    level: str = "yellow"
+    score: float = 0.0
+    z: float = 0.0
+    top_fields: str = "[]"
+    evidence: str = ""
+    created_at: str = ""
+
+
+class SimulationRunDecisionRecord(SQLModel, table=True):
+    __tablename__ = "simulation_run_decisions"
+
+    id: int | None = Field(default=None, primary_key=True)
+    run_id: str = Field(index=True, foreign_key="simulation_runs.id")
+    ts: str = ""
+    type: str = Field(index=True)
+    payload: str = "{}"
+    evidence_ref: str = ""
+    human_overridden: bool = False
 
 
 class SimulationSourceHistoryRecord(SQLModel, table=True):

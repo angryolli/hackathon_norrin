@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -42,6 +43,7 @@ class AppState:
     engine: StatisticalEngine = field(default_factory=StatisticalEngine)
     last_signal_id: str | None = None
     signal_count: int = 0
+    run_started_at: str = ""
     _monitor_key: tuple | None = None
     _monitor_snap: MonitorSnapshot | None = None
 
@@ -76,6 +78,11 @@ class AppState:
             self.dataset_id = ids[0] if ids else ""
         self.playing = False
         self._restore_simulation()
+        saved = self.store.get_simulation_state()
+        self.run_started_at = str(saved.get("run_started_at") or "")
+        if not self.run_started_at:
+            self.run_started_at = datetime.now(timezone.utc).isoformat()
+            self.store.set_run_started_at(self.run_started_at)
         rows = self.store.list_diagnosis(40)
         self.signal_count = len(rows)
         self.last_signal_id = str(rows[0]["id"]) if rows else None
@@ -165,6 +172,20 @@ class AppState:
         if not self.dataset_id:
             self.dataset_id = replay.source_id
 
+    def _sources_snapshot(self) -> list[dict]:
+        out: list[dict] = []
+        for spec in self._configured_specs():
+            out.append(
+                {
+                    "id": spec.get("id"),
+                    "name": spec.get("name"),
+                    "file_path": spec.get("file_path") or spec.get("live_path") or "",
+                    "x_column": spec.get("x_column") or "",
+                    "y_columns": list(spec.get("y_columns") or []),
+                }
+            )
+        return out
+
     def _persist_simulation(self) -> None:
         tick = self.replays[0].tick if self.replays else 0
         try:
@@ -173,6 +194,7 @@ class AppState:
                 tick,
                 [],
                 [replay.progress() for replay in self.replays],
+                run_started_at=self.run_started_at or None,
             )
         except Exception:
             return
@@ -192,14 +214,15 @@ class AppState:
         active = [replay for replay in self.replays if replay.numeric_cols]
         return bool(active) and all(replay.exhausted for replay in active)
 
-    def _rewind_all(self) -> None:
+    def _rewind_all(self, *, clear_signals: bool = True) -> None:
         if not self.replays:
             self._open_replays(resume=False)
         else:
             for replay in self.replays:
                 replay.reset_progress()
         self.engine.reset()
-        self.store.clear_diagnosis()
+        if clear_signals:
+            self.store.clear_diagnosis()
         self.last_signal_id = None
         self.signal_count = 0
 
@@ -226,12 +249,21 @@ class AppState:
         self._persist_simulation()
         return self.monitor()
 
-    def reset_simulation(self) -> MonitorSnapshot:
+    def reset_simulation(self) -> tuple[MonitorSnapshot, str | None]:
+        tick = self.replays[0].tick if self.replays else 0
+        archived_run_id = self.store.archive_current_run(
+            tick=tick,
+            finished=self.finished(),
+            sources=self._sources_snapshot(),
+            run_started_at=self.run_started_at,
+        )
         self.playing = False
-        self._rewind_all()
+        self._rewind_all(clear_signals=False)
+        self.run_started_at = datetime.now(timezone.utc).isoformat()
+        self.store.set_run_started_at(self.run_started_at)
         self._monitor_key = None
         self._persist_simulation()
-        return self.monitor()
+        return self.monitor(), archived_run_id
 
     def _ensure_disk_source(self, path: Path) -> str:
         resolved = str(path.expanduser().resolve())

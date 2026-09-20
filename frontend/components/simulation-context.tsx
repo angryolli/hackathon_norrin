@@ -7,6 +7,7 @@ import {
   monitorStreamUrl,
   type MonitorSnapshot,
   type RuntimeConfig,
+  type StreamResetResponse,
 } from "@/lib/browser-api";
 
 const DEFAULT_TPS = 2.22;
@@ -16,8 +17,11 @@ export const MAX_TICKS_PER_SECOND = 50;
 type SimulationContextValue = {
   playing: boolean;
   finished: boolean;
+  resetting: boolean;
+  resetRevision: number;
   setPlaying: (playing: boolean) => void;
   togglePlay: () => Promise<void>;
+  resetSimulation: () => Promise<StreamResetResponse>;
   ticksPerSecond: number;
   setTicksPerSecond: (rate: number) => Promise<void>;
   applySnapshot: (snap: {
@@ -30,8 +34,11 @@ type SimulationContextValue = {
 const SimulationContext = createContext<SimulationContextValue>({
   playing: false,
   finished: false,
+  resetting: false,
+  resetRevision: 0,
   setPlaying: () => undefined,
-  togglePlay: async () => undefined,
+  togglePlay: async () => ({ snapshot: {} as MonitorSnapshot, archived_run_id: null }),
+  resetSimulation: async () => ({ snapshot: {} as MonitorSnapshot, archived_run_id: null }),
   ticksPerSecond: DEFAULT_TPS,
   setTicksPerSecond: async () => undefined,
   applySnapshot: () => undefined,
@@ -45,6 +52,8 @@ function clampRate(rate: number) {
 export function SimulationProvider({ children }: { children: React.ReactNode }) {
   const [playing, setPlaying] = useState(false);
   const [finished, setFinished] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const [resetRevision, setResetRevision] = useState(0);
   const [ticksPerSecond, setTicksPerSecondState] = useState(DEFAULT_TPS);
 
   useEffect(() => {
@@ -109,6 +118,21 @@ export function SimulationProvider({ children }: { children: React.ReactNode }) 
     };
   }, []);
 
+  const applySnapshot = useCallback(
+    (snap: {
+      playing?: boolean | null;
+      ticks_per_second?: number | null;
+      finished?: boolean | null;
+    }) => {
+      if (snap.playing != null) setPlaying(Boolean(snap.playing));
+      if (snap.finished != null) setFinished(Boolean(snap.finished));
+      if (snap.ticks_per_second != null) {
+        setTicksPerSecondState(clampRate(snap.ticks_per_second));
+      }
+    },
+    [],
+  );
+
   const togglePlay = useCallback(async () => {
     const snap = await browserPost<MonitorSnapshot>("/stream/control", {
       playing: !playing,
@@ -133,32 +157,47 @@ export function SimulationProvider({ children }: { children: React.ReactNode }) 
     if (snap.finished != null) setFinished(Boolean(snap.finished));
   }, []);
 
-  const applySnapshot = useCallback(
-    (snap: {
-      playing?: boolean | null;
-      ticks_per_second?: number | null;
-      finished?: boolean | null;
-    }) => {
-      if (snap.playing != null) setPlaying(Boolean(snap.playing));
-      if (snap.finished != null) setFinished(Boolean(snap.finished));
-      if (snap.ticks_per_second != null) {
-        setTicksPerSecondState(clampRate(snap.ticks_per_second));
-      }
-    },
-    [],
-  );
+  const resetSimulation = useCallback(async () => {
+    setResetting(true);
+    try {
+      const body = await browserPost<StreamResetResponse>("/stream/reset", {});
+      applySnapshot(body.snapshot);
+      await fetch("/api/system-agent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reset: true }),
+      }).catch(() => undefined);
+      setResetRevision((value) => value + 1);
+      return body;
+    } finally {
+      setResetting(false);
+    }
+  }, [applySnapshot]);
 
   const value = useMemo<SimulationContextValue>(
     () => ({
       playing,
       finished,
+      resetting,
+      resetRevision,
       setPlaying,
       togglePlay,
+      resetSimulation,
       ticksPerSecond,
       setTicksPerSecond,
       applySnapshot,
     }),
-    [playing, finished, togglePlay, ticksPerSecond, setTicksPerSecond, applySnapshot],
+    [
+      playing,
+      finished,
+      resetting,
+      resetRevision,
+      togglePlay,
+      resetSimulation,
+      ticksPerSecond,
+      setTicksPerSecond,
+      applySnapshot,
+    ],
   );
 
   return (

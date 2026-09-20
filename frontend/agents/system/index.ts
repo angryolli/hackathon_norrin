@@ -1,5 +1,6 @@
 export {
   getSystemAgentStatus,
+  resetSystemAgent,
   startSystemAgent,
   stopSystemAgent,
   type SystemAgentStatus,

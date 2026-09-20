@@ -11,13 +11,18 @@ import {
   PanelLeft,
   Pause,
   Play,
+  RotateCcw,
   ScrollText,
   Settings,
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { browserGet, type DataSource, type RuntimeConfig } from "@/lib/browser-api";
+import {
+  browserGet,
+  type DataSource,
+  type RuntimeConfig,
+} from "@/lib/browser-api";
 import { useSimulation } from "@/components/simulation-context";
 import { SimulationSpeedometer } from "@/components/simulation-speedometer";
 
@@ -35,12 +40,15 @@ export function AppSidebar() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [cfg, setCfg] = useState<RuntimeConfig | null>(null);
   const [sources, setSources] = useState<DataSource[]>([]);
-  const { playing, finished, togglePlay } = useSimulation();
+  const { playing, finished, resetting, togglePlay, resetSimulation } =
+    useSimulation();
+  const [resetOpen, setResetOpen] = useState(false);
 
   useEffect(() => {
     setMounted(true);
     try {
-      if (window.localStorage.getItem("tpm-sidebar") === "1") setCollapsed(true);
+      if (window.localStorage.getItem("tpm-sidebar") === "1")
+        setCollapsed(true);
     } catch {
       /* ignore */
     }
@@ -100,13 +108,16 @@ export function AppSidebar() {
   const folded = mounted && collapsed;
 
   useEffect(() => {
-    if (!settingsOpen) return;
+    if (!settingsOpen && !resetOpen) return;
     function onKey(event: KeyboardEvent) {
-      if (event.key === "Escape") setSettingsOpen(false);
+      if (event.key === "Escape") {
+        setSettingsOpen(false);
+        setResetOpen(false);
+      }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [settingsOpen]);
+  }, [resetOpen, settingsOpen]);
 
   return (
     <>
@@ -115,9 +126,17 @@ export function AppSidebar() {
           "gpu-layer sticky top-0 flex h-svh shrink-0 flex-col self-start border-r border-border bg-background transition-[width] duration-200",
           folded ? "w-14" : "w-52",
         )}
-        style={{ transform: "translate3d(0,0,0)", willChange: "width, transform" }}
+        style={{
+          transform: "translate3d(0,0,0)",
+          willChange: "width, transform",
+        }}
       >
-        <div className={cn("flex items-center gap-2 px-3 py-3", folded && "justify-center px-0")}>
+        <div
+          className={cn(
+            "flex items-center gap-2 px-3 py-3",
+            folded && "justify-center px-0",
+          )}
+        >
           <p
             className={cn(
               "flex-1 font-mono text-xs tracking-widest text-muted-foreground uppercase",
@@ -147,12 +166,26 @@ export function AppSidebar() {
               playing
                 ? "Pause"
                 : finished
-                  ? "Stream ended — press Play to restart from the top"
+                  ? "Stream ended. Reset below to play again."
                   : "Play"
             }
           >
             {playing ? <Pause /> : <Play />}
-            <span className={cn(folded && "hidden")}>{playing ? "Pause" : "Play"}</span>
+            <span className={cn(folded && "hidden")}>
+              {playing ? "Pause" : "Play"}
+            </span>
+          </Button>
+          <Button
+            size={folded ? "icon-sm" : "sm"}
+            variant="outline"
+            className={cn("w-full", !folded && "justify-start gap-2")}
+            onClick={() => setResetOpen(true)}
+            disabled={resetting}
+            aria-label="Reset simulation"
+            title="Archive the current run and start fresh"
+          >
+            <RotateCcw className={cn(resetting && "animate-spin")} />
+            <span className={cn(folded && "hidden")}>Reset</span>
           </Button>
           <SimulationSpeedometer compact={folded} />
         </div>
@@ -162,7 +195,8 @@ export function AppSidebar() {
             const active =
               item.href === "/"
                 ? pathname === "/"
-                : pathname === item.href || pathname.startsWith(`${item.href}/`);
+                : pathname === item.href ||
+                  pathname.startsWith(`${item.href}/`);
             const Icon = item.icon;
             return (
               <Link
@@ -198,6 +232,55 @@ export function AppSidebar() {
         </div>
       </aside>
 
+      {resetOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setResetOpen(false)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="reset-sim-title"
+            className="w-full max-w-md rounded-xl border border-border bg-card p-4 shadow-lg"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-4 flex items-center justify-between">
+              <h2 id="reset-sim-title" className="text-sm font-medium">
+                Reset simulation
+              </h2>
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                onClick={() => setResetOpen(false)}
+                aria-label="Close"
+              >
+                <X />
+              </Button>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              Archives the current alarm log and decision log to Reports &amp;
+              Logs, clears the System Dashboard and system agent context, and
+              rewinds all sources to tick 0.
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
+              <Button variant="ghost" onClick={() => setResetOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                disabled={resetting}
+                onClick={() => {
+                  void resetSimulation()
+                    .then(() => setResetOpen(false))
+                    .catch(() => undefined);
+                }}
+              >
+                Reset
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {settingsOpen && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
@@ -225,7 +308,9 @@ export function AppSidebar() {
             </div>
             <div className="space-y-4 text-sm">
               <label className="block space-y-1">
-                <span className="text-xs text-muted-foreground">Active data source</span>
+                <span className="text-xs text-muted-foreground">
+                  Active data source
+                </span>
                 <select
                   className="h-8 w-full rounded-md border border-input bg-background px-2 font-mono text-xs"
                   value={cfg?.dataset_id ?? sources[0]?.id ?? ""}

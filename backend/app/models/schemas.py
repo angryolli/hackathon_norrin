@@ -319,6 +319,22 @@ class DiagnosisSnapshot(BaseModel):
     evidence: str = "Rolling z-score over expanding per-channel mean/sd. No raw rows."
 
 
+class SimulationRunSummary(BaseModel):
+    id: str
+    started_at: str
+    ended_at: str
+    tick: int = 0
+    finished: bool = False
+    sources: list[dict] = Field(default_factory=list)
+    alarm_count: int = 0
+    decision_count: int = 0
+
+
+class SimulationRunDetail(SimulationRunSummary):
+    alarms: list[DiagnosisSignal] = Field(default_factory=list)
+    decisions: list[DecisionEntry] = Field(default_factory=list)
+
+
 class FieldCard(BaseModel):
     field_id: str
     sparkline: list[float] = Field(default_factory=list, max_length=SPARKLINE_POINTS)
@@ -346,6 +362,11 @@ class MonitorSnapshot(BaseModel):
     ticks_per_second: float = 2.0
     finished: bool = False
     evidence: str = "Monitor snapshot is aggregated windows, not raw row dumps."
+
+
+class StreamResetResponse(BaseModel):
+    snapshot: MonitorSnapshot
+    archived_run_id: str | None = None
 
 
 class ChatMessageBody(BaseModel):

@@ -29,7 +29,10 @@ from app.models.schemas import (
     HealthResponse,
     MonitorSnapshot,
     RuntimeConfig,
+    SimulationRunDetail,
+    SimulationRunSummary,
     StreamControl,
+    StreamResetResponse,
 )
 from app.state import STATE
 
@@ -259,11 +262,25 @@ def stream_control(body: StreamControl) -> MonitorSnapshot:
     return _broadcast_snapshot()
 
 
-@app.post("/stream/reset", response_model=MonitorSnapshot)
-def stream_reset() -> MonitorSnapshot:
-    STATE.reset_simulation()
+@app.post("/stream/reset", response_model=StreamResetResponse)
+def stream_reset() -> StreamResetResponse:
+    snap, archived_run_id = STATE.reset_simulation()
     _broadcast_events()
-    return _broadcast_snapshot()
+    _broadcast_snapshot()
+    return StreamResetResponse(snapshot=snap, archived_run_id=archived_run_id)
+
+
+@app.get("/simulation/runs", response_model=list[SimulationRunSummary])
+def simulation_runs(limit: int = Query(default=50, ge=1, le=200)) -> list[SimulationRunSummary]:
+    return [SimulationRunSummary(**row) for row in STATE.store.list_simulation_runs(limit)]
+
+
+@app.get("/simulation/runs/{run_id}", response_model=SimulationRunDetail)
+def simulation_run(run_id: str) -> SimulationRunDetail:
+    row = STATE.store.get_simulation_run(run_id)
+    if row is None:
+        raise HTTPException(404, f"unknown simulation run {run_id}")
+    return SimulationRunDetail(**row)
 
 
 @app.get("/diagnosis")

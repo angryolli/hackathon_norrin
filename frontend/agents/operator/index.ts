@@ -19,9 +19,9 @@ async function logCall(agent: string, tools: string[]) {
 
 const getDiagnosisTool = tool({
   description:
-    "Read the diagnosis table: yellow/red rolling z-score signals plus the current per-channel snapshot (n, mean, sd, skew, kurtosis, |z|). Never raw rows.",
+    "Read the current alarm log and per-channel snapshot for the active simulation run (yellow/red signals, n, mean, sd, skew, kurtosis, |z|). Never raw rows.",
   inputSchema: z.object({
-    reason: z.string().optional().describe("Why you need the diagnosis table"),
+    reason: z.string().optional().describe("Why you need the current alarm log"),
   }),
   execute: async () => {
     try {
@@ -38,7 +38,8 @@ const getDiagnosisTool = tool({
 });
 
 const getDecisionLogTool = tool({
-  description: "Audit log of inferences, flags, diagnoses, overrides.",
+  description:
+    "Read the current decision log for the active simulation run (inferences, flags, diagnoses, overrides).",
   inputSchema: z.object({
     type: z.string().optional().describe("Optional log type filter"),
   }),
@@ -56,6 +57,10 @@ const getDecisionLogTool = tool({
 
 const INSTRUCTIONS = `You are the operator-facing chat for a live process monitor.
 
+You only see the CURRENT simulation run. Refer to "the current sources", "the current alarm log",
+and "the current decision log". Past runs live in Reports & Logs after a reset; you do not see them
+unless the operator quotes them.
+
 A flag means a sustained excursion, not a blip. Each channel is studentized against its own expanding
 mean and sd over the run so far; a sample is hot when some channel reaches |z| >= 4. Yellow needs k
 consecutive hot samples (default k=6), red the same run at |z| >= 6, and the first 20 samples never
@@ -65,10 +70,11 @@ sigma, and for how many samples in a row.
 The autonomous system agent (not you) writes understanding, quality, and root-cause reports.
 Your job is plain-language questions: why a flag fired, what a field is doing, what an override means.
 Call getDiagnosis before answering about the process, flags, yellow/red signals, or fields.
-Call getDecisionLog when asked about overrides or past actions.
+Call getDecisionLog when asked about overrides or actions in the current run.
 Answer from those tool results. You never see raw sensor rows and must never ask for them.
 
-If the diagnosis table is empty, the lookup failed, or the run is not yet calibrated (first 20 samples), say so clearly.
+If the current alarm log is empty, the lookup failed, or the run is not yet calibrated (first 20
+samples), say so clearly. Reset clears the current run; do not cite alarms from before a reset.
 Every substantive answer must mention sources as artifact_type:id (for example diagnosis:sig_abc).
 After a tool result arrives, write a plain-language answer for the operator.`;
 

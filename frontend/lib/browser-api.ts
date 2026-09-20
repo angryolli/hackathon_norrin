@@ -123,6 +123,48 @@ export type RuntimeConfig = {
   finished?: boolean;
 };
 
+export type StreamResetResponse = {
+  snapshot: MonitorSnapshot;
+  archived_run_id: string | null;
+};
+
+export type SimulationRunSummary = {
+  id: string;
+  started_at: string;
+  ended_at: string;
+  tick: number;
+  finished: boolean;
+  sources: Array<{
+    id?: string;
+    name?: string;
+    file_path?: string;
+    x_column?: string;
+    y_columns?: string[];
+  }>;
+  alarm_count: number;
+  decision_count: number;
+};
+
+export type SimulationRunDetail = SimulationRunSummary & {
+  alarms: Array<{
+    id: string;
+    tick: number;
+    level: string;
+    score: number;
+    z: number;
+    top_fields: Array<Record<string, unknown>>;
+    evidence: string;
+    created_at: string;
+  }>;
+  decisions: Array<{
+    ts: string;
+    type: string;
+    payload: unknown;
+    evidence_ref: string;
+    human_overridden: boolean;
+  }>;
+};
+
 export type ChatSummary = {
   id: string;
   title: string;

@@ -18,9 +18,12 @@ from app.storage.models import (
     ChatMessageRecord,
     DataSourceRecord,
     DecisionLogRecord,
+    DiagnosisSignalRecord,
+    SimulationRunAlarmRecord,
+    SimulationRunDecisionRecord,
+    SimulationRunRecord,
     SimulationSourceHistoryRecord,
     SimulationStateRecord,
-    DiagnosisSignalRecord,
 )
 
 DB_PATH = ARTIFACT_DIR / "monitor.sqlite"
@@ -42,6 +45,7 @@ class ArtifactStore:
         SQLModel.metadata.create_all(self._engine)
         self._migrate_data_sources()
         self._migrate_simulation_history()
+        self._migrate_simulation_state()
 
     def _session(self) -> Session:
         return Session(self._engine, expire_on_commit=False)
@@ -72,6 +76,16 @@ class ArtifactStore:
                         "ALTER TABLE simulation_source_history "
                         "ADD COLUMN exhausted BOOLEAN DEFAULT 0"
                     )
+                )
+            conn.commit()
+
+    def _migrate_simulation_state(self) -> None:
+        with self._engine.connect() as conn:
+            rows = conn.execute(text("PRAGMA table_info(simulation_state)")).fetchall()
+            names = {row[1] for row in rows}
+            if names and "run_started_at" not in names:
+                conn.execute(
+                    text("ALTER TABLE simulation_state ADD COLUMN run_started_at TEXT DEFAULT ''")
                 )
             conn.commit()
 
@@ -407,7 +421,7 @@ class ArtifactStore:
         with self._lock, self._session() as session:
             row = session.get(SimulationStateRecord, "current")
             if row is None:
-                return {"playing": False, "tick": 0, "t2_history": []}
+                return {"playing": False, "tick": 0, "t2_history": [], "run_started_at": ""}
             try:
                 t2_history = json.loads(row.t2_history or "[]")
             except (TypeError, ValueError):
@@ -418,7 +432,29 @@ class ArtifactStore:
                 "playing": bool(row.playing),
                 "tick": int(row.tick or 0),
                 "t2_history": [float(v) for v in t2_history],
+                "run_started_at": str(getattr(row, "run_started_at", None) or ""),
             }
+
+    def set_run_started_at(self, started_at: str) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._lock, self._session() as session:
+            row = session.get(SimulationStateRecord, "current")
+            if row is None:
+                session.add(
+                    SimulationStateRecord(
+                        id="current",
+                        playing=False,
+                        tick=0,
+                        t2_history="[]",
+                        run_started_at=started_at,
+                        updated_at=now,
+                    )
+                )
+            else:
+                row.run_started_at = started_at
+                row.updated_at = now
+                session.add(row)
+            session.commit()
 
     def list_simulation_sources(self) -> list[dict]:
         with self._lock, self._session() as session:
@@ -433,7 +469,15 @@ class ArtifactStore:
             session.delete(row)
             session.commit()
 
-    def save_simulation(self, playing: bool, tick: int, t2_history: list, sources: list[dict]) -> None:
+    def save_simulation(
+        self,
+        playing: bool,
+        tick: int,
+        t2_history: list,
+        sources: list[dict],
+        *,
+        run_started_at: str | None = None,
+    ) -> None:
         now = datetime.now(timezone.utc).isoformat()
         with self._lock, self._session() as session:
             state = session.get(SimulationStateRecord, "current")
@@ -445,6 +489,7 @@ class ArtifactStore:
                         playing=playing,
                         tick=tick,
                         t2_history=payload,
+                        run_started_at=run_started_at or now,
                         updated_at=now,
                     )
                 )
@@ -452,6 +497,10 @@ class ArtifactStore:
                 state.playing = playing
                 state.tick = tick
                 state.t2_history = payload
+                if run_started_at is not None:
+                    state.run_started_at = run_started_at
+                elif not state.run_started_at:
+                    state.run_started_at = now
                 state.updated_at = now
                 session.add(state)
             keep = {str(item.get("source_id") or "") for item in sources}
@@ -557,6 +606,153 @@ class ArtifactStore:
             for row in rows:
                 session.delete(row)
             session.commit()
+
+    def clear_decision_log(self) -> None:
+        with self._lock, self._session() as session:
+            rows = session.exec(select(DecisionLogRecord)).all()
+            for row in rows:
+                session.delete(row)
+            session.commit()
+
+    def archive_current_run(
+        self,
+        *,
+        tick: int,
+        finished: bool,
+        sources: list[dict],
+        run_started_at: str,
+    ) -> str | None:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._lock, self._session() as session:
+            alarms = session.exec(select(DiagnosisSignalRecord)).all()
+            decisions = session.exec(select(DecisionLogRecord)).all()
+            if tick <= 0 and not alarms and not decisions:
+                return None
+            run_id = f"run_{uuid.uuid4().hex[:10]}"
+            started = run_started_at or now
+            session.add(
+                SimulationRunRecord(
+                    id=run_id,
+                    started_at=started,
+                    ended_at=now,
+                    tick=int(tick or 0),
+                    finished=bool(finished),
+                    sources_json=json.dumps(sources),
+                    alarm_count=len(alarms),
+                    decision_count=len(decisions),
+                )
+            )
+            session.flush()
+            for row in alarms:
+                session.add(
+                    SimulationRunAlarmRecord(
+                        run_id=run_id,
+                        signal_id=row.id,
+                        tick=int(row.tick or 0),
+                        level=str(row.level or "yellow"),
+                        score=float(row.score or 0),
+                        z=float(row.z or 0),
+                        top_fields=row.top_fields or "[]",
+                        evidence=str(row.evidence or ""),
+                        created_at=str(row.created_at or now),
+                    )
+                )
+                session.delete(row)
+            for row in decisions:
+                session.add(
+                    SimulationRunDecisionRecord(
+                        run_id=run_id,
+                        ts=row.ts,
+                        type=row.type,
+                        payload=row.payload,
+                        evidence_ref=row.evidence_ref,
+                        human_overridden=bool(row.human_overridden),
+                    )
+                )
+                session.delete(row)
+            session.commit()
+            return run_id
+
+    def list_simulation_runs(self, limit: int = 50) -> list[dict]:
+        with self._lock, self._session() as session:
+            rows = session.exec(
+                select(SimulationRunRecord)
+                .order_by(col(SimulationRunRecord.ended_at).desc())
+                .limit(limit)
+            ).all()
+            return [self._run_dict(row) for row in rows]
+
+    def get_simulation_run(self, run_id: str) -> dict | None:
+        with self._lock, self._session() as session:
+            row = session.get(SimulationRunRecord, run_id)
+            if row is None:
+                return None
+            alarms = session.exec(
+                select(SimulationRunAlarmRecord)
+                .where(col(SimulationRunAlarmRecord.run_id) == run_id)
+                .order_by(col(SimulationRunAlarmRecord.tick).desc())
+            ).all()
+            decisions = session.exec(
+                select(SimulationRunDecisionRecord)
+                .where(col(SimulationRunDecisionRecord.run_id) == run_id)
+                .order_by(col(SimulationRunDecisionRecord.id).desc())
+            ).all()
+            return {
+                **self._run_dict(row),
+                "alarms": [self._run_alarm_dict(item) for item in alarms],
+                "decisions": [self._run_decision_dict(item) for item in decisions],
+            }
+
+    def _run_dict(self, row: SimulationRunRecord) -> dict:
+        try:
+            sources = json.loads(row.sources_json or "[]")
+        except (TypeError, ValueError):
+            sources = []
+        if not isinstance(sources, list):
+            sources = []
+        return {
+            "id": row.id,
+            "started_at": row.started_at,
+            "ended_at": row.ended_at,
+            "tick": int(row.tick or 0),
+            "finished": bool(row.finished),
+            "sources": sources,
+            "alarm_count": int(row.alarm_count or 0),
+            "decision_count": int(row.decision_count or 0),
+        }
+
+    def _run_alarm_dict(self, row: SimulationRunAlarmRecord) -> dict:
+        try:
+            top_fields = json.loads(row.top_fields or "[]")
+        except (TypeError, ValueError):
+            top_fields = []
+        if not isinstance(top_fields, list):
+            top_fields = []
+        return {
+            "id": row.signal_id,
+            "tick": int(row.tick or 0),
+            "level": row.level,
+            "score": float(row.score or 0),
+            "z": float(row.z or 0),
+            "top_fields": top_fields,
+            "evidence": row.evidence,
+            "created_at": row.created_at,
+        }
+
+    def _run_decision_dict(self, row: SimulationRunDecisionRecord) -> dict:
+        try:
+            payload = json.loads(row.payload or "{}")
+        except (TypeError, ValueError):
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        return {
+            "ts": row.ts,
+            "type": row.type,
+            "payload": payload,
+            "evidence_ref": row.evidence_ref,
+            "human_overridden": bool(row.human_overridden),
+        }
 
     def _diagnosis_dict(self, row: DiagnosisSignalRecord) -> dict:
         try:

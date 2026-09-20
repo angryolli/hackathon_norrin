@@ -217,7 +217,9 @@ async def main() -> int:
         )
         checks.ok("eof: play does not rewind", monitor["tick"] == 960, f"tick {monitor['tick']}")
 
-        status, monitor = await asgi(app, "POST", "/stream/reset", {})
+        status, reset_body = await asgi(app, "POST", "/stream/reset", {})
+        monitor = reset_body["snapshot"] if isinstance(reset_body, dict) else reset_body
+        checks.ok("eof: reset archives the finished run", bool(reset_body.get("archived_run_id")))
         checks.ok("eof: reset parks at tick 0", monitor["tick"] == 0, f"tick {monitor['tick']}")
         checks.ok("eof: reset clears finished", monitor.get("finished") is False)
         status, monitor = await asgi(app, "POST", "/stream/control", {"playing": True})

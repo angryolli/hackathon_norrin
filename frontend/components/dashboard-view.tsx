@@ -20,6 +20,7 @@ import {
 import { browserPost, eventsStreamUrl } from "@/lib/browser-api";
 import type { DiagnosisSignal, DiagnosisSnapshot } from "@/lib/pipeline";
 import { cn } from "@/lib/utils";
+import { useSimulation } from "@/components/simulation-context";
 
 export function DashboardView() {
   const router = useRouter();
@@ -31,6 +32,16 @@ export function DashboardView() {
   const [reviewNote, setReviewNote] = useState("");
   const [reviewBusy, setReviewBusy] = useState(false);
   const [reviewMsg, setReviewMsg] = useState<string | null>(null);
+  const { resetRevision } = useSimulation();
+
+  useEffect(() => {
+    setSignals([]);
+    setCurrent(null);
+    setOpen(null);
+    setReviewNote("");
+    setReviewMsg(null);
+    setSystemAgent(IDLE_AGENT);
+  }, [resetRevision]);
 
   useEffect(() => {
     let on = true;
@@ -96,7 +107,7 @@ export function DashboardView() {
     return () => {
       on = false;
     };
-  }, []);
+  }, [resetRevision]);
 
   useEffect(() => {
     if (!systemAgent.running) return;

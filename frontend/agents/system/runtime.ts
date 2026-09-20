@@ -114,4 +114,13 @@ export function stopSystemAgent(): SystemAgentStatus {
   return snapshot();
 }
 
+export function resetSystemAgent(): SystemAgentStatus {
+  const runtime = handle();
+  runtime.abort?.abort();
+  runtime.abort = null;
+  runtime.job = null;
+  runtime.status = emptyStatus();
+  return snapshot();
+}
+
 export type { SystemAgentStatus } from "./types";

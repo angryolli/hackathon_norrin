@@ -36,6 +36,6 @@ Demo scheduler: launch runs **one cycle** then stops (no token burn). Continuous
 | 3 Drift / anomaly | Compute plane + system narration | System Dashboard → Alerts (inspect stream on Telemetry) |
 | 4 Root-cause diagnosis | System agent (+ critique) | System Dashboard → Root cause |
 | 5 Human review | Operator (controls) | System Dashboard → Judgment; questions also `/agent` |
-| 6 Decision log | Both (model calls + overrides) | Reports & Logs → Decision log |
+| 6 Decision log | Both (model calls + overrides) | Reports & Logs → Current decision log; past runs after reset |
 | 7 Adaptability | Architecture (unlabeled columns, source `kind`) | Reports & Logs → Data flow |
 | 8 Data-flow record | Node LLM layer | Reports & Logs → Data flow |

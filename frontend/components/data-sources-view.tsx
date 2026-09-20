@@ -2,7 +2,7 @@
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { Plus, RotateCcw, Trash2, X } from "lucide-react";
+import { Plus, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { StreamChart, type ChartMark } from "@/components/stream-chart";
@@ -52,7 +52,8 @@ function marksForStream(
   const out: ChartMark[] = [];
   for (const signal of signals) {
     if (signal.level !== "yellow" && signal.level !== "red") continue;
-    if (!signal.top_fields.some((field) => fieldHit(field.field_id, stream))) continue;
+    if (!signal.top_fields.some((field) => fieldHit(field.field_id, stream)))
+      continue;
     const index = signal.tick - windowStart;
     if (index < 0 || index > len - 1) continue;
     out.push({ index, level: signal.level });
@@ -79,7 +80,6 @@ export function DataSourcesView() {
   const [error, setError] = useState<string | null>(null);
   const [snap, setSnap] = useState<MonitorSnapshot | null>(null);
   const [sources, setSources] = useState<DataSource[]>([]);
-  const [resetOpen, setResetOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -92,7 +92,13 @@ export function DataSourcesView() {
     width: number;
     height: number;
   } | null>(null);
-  const ticksRef = useRef({ tick: -1, demo: -1, dataset: "", playing: false, fields: "" });
+  const ticksRef = useRef({
+    tick: -1,
+    demo: -1,
+    dataset: "",
+    playing: false,
+    fields: "",
+  });
   const { applySnapshot, finished } = useSimulation();
   const searchParams = useSearchParams();
   const openedQuery = useRef(false);
@@ -134,7 +140,9 @@ export function DataSourcesView() {
       source = new EventSource(monitorStreamUrl());
       source.addEventListener("snapshot", (event) => {
         try {
-          apply(JSON.parse((event as MessageEvent<string>).data) as MonitorSnapshot);
+          apply(
+            JSON.parse((event as MessageEvent<string>).data) as MonitorSnapshot,
+          );
         } catch {
           /* ignore malformed frames */
         }
@@ -174,7 +182,9 @@ export function DataSourcesView() {
     function apply(data: DiagnosisSnapshot) {
       if (!on) return;
       const next = data.signals ?? data.events ?? [];
-      const nextSig = next.map((row) => `${row.id}:${row.level}:${row.tick}`).join("|");
+      const nextSig = next
+        .map((row) => `${row.id}:${row.level}:${row.tick}`)
+        .join("|");
       if (nextSig === sig.current) return;
       sig.current = nextSig;
       setSignals(next);
@@ -185,7 +195,11 @@ export function DataSourcesView() {
       source = new EventSource(eventsStreamUrl());
       source.addEventListener("events", (event) => {
         try {
-          apply(JSON.parse((event as MessageEvent<string>).data) as DiagnosisSnapshot);
+          apply(
+            JSON.parse(
+              (event as MessageEvent<string>).data,
+            ) as DiagnosisSnapshot,
+          );
         } catch {
           /* ignore malformed frames */
         }
@@ -216,7 +230,8 @@ export function DataSourcesView() {
       try {
         const res = await fetch("/api/system-agent");
         const data = (await res.json()) as SystemAgentStatus;
-        if (on) setAgent({ ...IDLE_AGENT, ...data, sensors: data.sensors ?? {} });
+        if (on)
+          setAgent({ ...IDLE_AGENT, ...data, sensors: data.sensors ?? {} });
       } catch {
         /* ignore */
       }
@@ -234,7 +249,8 @@ export function DataSourcesView() {
       fetch("/api/system-agent")
         .then((r) => r.json())
         .then((data: SystemAgentStatus) => {
-          if (on) setAgent({ ...IDLE_AGENT, ...data, sensors: data.sensors ?? {} });
+          if (on)
+            setAgent({ ...IDLE_AGENT, ...data, sensors: data.sensors ?? {} });
         })
         .catch(() => undefined);
     }, 2000);
@@ -257,7 +273,7 @@ export function DataSourcesView() {
   }, []);
 
   useEffect(() => {
-    if (!adding && !resetOpen && !deleteOpen && !deleting) return;
+    if (!adding && !deleteOpen && !deleting) return;
     function onKey(event: KeyboardEvent) {
       if (event.key !== "Escape") return;
       if (deleteOpen) {
@@ -269,15 +285,11 @@ export function DataSourcesView() {
         setSelected(new Set());
         return;
       }
-      if (resetOpen) {
-        setResetOpen(false);
-        return;
-      }
       if (adding) closeModal();
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [adding, resetOpen, deleteOpen, deleting]);
+  }, [adding, deleteOpen, deleting]);
 
   useEffect(() => {
     if (!adding || choice !== "file") return;
@@ -308,7 +320,9 @@ export function DataSourcesView() {
           setPreview(null);
           setXColumn("");
           setYColumns([]);
-          setError(err instanceof Error ? err.message : "could not read headers");
+          setError(
+            err instanceof Error ? err.message : "could not read headers",
+          );
         })
         .finally(() => {
           if (on) setPreviewing(false);
@@ -414,24 +428,18 @@ export function DataSourcesView() {
     });
   }
 
-  async function confirmReset() {
-    setBusy(true);
-    try {
-      applySnap(await browserPost<MonitorSnapshot>("/stream/reset", {}));
-      setResetOpen(false);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "reset failed");
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function confirmDelete() {
-    const fields = [...selected].map(parseSourceKey).filter((item) => item.source_id && item.field_id);
+    const fields = [...selected]
+      .map(parseSourceKey)
+      .filter((item) => item.source_id && item.field_id);
     if (fields.length === 0) return;
     setBusy(true);
     try {
-      applySnap(await browserPost<MonitorSnapshot>("/data-sources/bulk-delete", { fields }));
+      applySnap(
+        await browserPost<MonitorSnapshot>("/data-sources/bulk-delete", {
+          fields,
+        }),
+      );
       setDeleteOpen(false);
       setDeleting(false);
       setSelected(new Set());
@@ -465,13 +473,16 @@ export function DataSourcesView() {
 
   const configuredSources = useMemo(() => {
     return sources.filter(
-      (source) => Boolean(source.x_column) || (source.y_columns?.length ?? 0) > 0,
+      (source) =>
+        Boolean(source.x_column) || (source.y_columns?.length ?? 0) > 0,
     );
   }, [sources]);
 
   const idleFields = useMemo(() => {
     const seen = new Set(
-      streams.map((stream) => sourceKey(stream.source_id ?? "", stream.field_id)),
+      streams.map((stream) =>
+        sourceKey(stream.source_id ?? "", stream.field_id),
+      ),
     );
     return configuredSources.flatMap((source) =>
       (source.y_columns ?? [])
@@ -488,7 +499,8 @@ export function DataSourcesView() {
   const openStream = useMemo((): FieldCard | null => {
     if (!openKey) return null;
     const live = streams.find(
-      (stream) => sourceKey(stream.source_id ?? "", stream.field_id) === openKey,
+      (stream) =>
+        sourceKey(stream.source_id ?? "", stream.field_id) === openKey,
     );
     if (live) return live;
     const idle = idleFields.find((field) => field.key === openKey);
@@ -504,17 +516,20 @@ export function DataSourcesView() {
     };
   }, [idleFields, openKey, streams]);
 
-  const openSource = useCallback((key: string, node: HTMLElement) => {
-    if (deleting) return;
-    const rect = node.getBoundingClientRect();
-    setOrigin({
-      left: rect.left,
-      top: rect.top,
-      width: rect.width,
-      height: rect.height,
-    });
-    setOpenKey(key);
-  }, [deleting]);
+  const openSource = useCallback(
+    (key: string, node: HTMLElement) => {
+      if (deleting) return;
+      const rect = node.getBoundingClientRect();
+      setOrigin({
+        left: rect.left,
+        top: rect.top,
+        width: rect.width,
+        height: rect.height,
+      });
+      setOpenKey(key);
+    },
+    [deleting],
+  );
 
   useEffect(() => {
     if (openedQuery.current || deleting) return;
@@ -552,7 +567,9 @@ export function DataSourcesView() {
   }, [deleting, idleFields, openSource, searchParams, streams]);
 
   const allFieldKeys = useMemo(() => {
-    const keys = streams.map((stream) => sourceKey(stream.source_id ?? "", stream.field_id));
+    const keys = streams.map((stream) =>
+      sourceKey(stream.source_id ?? "", stream.field_id),
+    );
     for (const field of idleFields) keys.push(field.key);
     return keys.filter(Boolean);
   }, [idleFields, streams]);
@@ -574,10 +591,6 @@ export function DataSourcesView() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border px-4">
-        <Button size="sm" variant="outline" onClick={() => setResetOpen(true)}>
-          <RotateCcw />
-          Reset
-        </Button>
         <Button
           size="sm"
           variant="outline"
@@ -626,7 +639,7 @@ export function DataSourcesView() {
             : streams.length === 0
               ? "Add sources, then play from the sidebar"
               : finished
-                ? "Stream ended — press Play to restart"
+                ? "Stream ended. Reset from the sidebar to play again"
                 : "Simulation progress is kept when you pause"}
         </span>
       </div>
@@ -723,7 +736,10 @@ export function DataSourcesView() {
                 type="button"
                 onClick={() => {
                   setChoice("file");
-                  setFilePath((current) => current.trim() || snap?.demo_data_uri || DEMO_URI);
+                  setFilePath(
+                    (current) =>
+                      current.trim() || snap?.demo_data_uri || DEMO_URI,
+                  );
                 }}
                 className={cn(
                   "rounded-xl border px-3 py-6 text-sm transition-colors",
@@ -762,7 +778,9 @@ export function DataSourcesView() {
                       />
                     </label>
                     {previewing && (
-                      <p className="text-xs text-muted-foreground">Reading column names…</p>
+                      <p className="text-xs text-muted-foreground">
+                        Reading column names…
+                      </p>
                     )}
                     {preview && (
                       <>
@@ -774,7 +792,9 @@ export function DataSourcesView() {
                             onChange={(e) => {
                               const next = e.target.value;
                               setXColumn(next);
-                              setYColumns((current) => current.filter((col) => col !== next));
+                              setYColumns((current) =>
+                                current.filter((col) => col !== next),
+                              );
                             }}
                           >
                             <option value="">Select column</option>
@@ -801,7 +821,9 @@ export function DataSourcesView() {
                                     checked={yColumns.includes(column)}
                                     onChange={() => toggleY(column)}
                                   />
-                                  <span className="truncate font-mono text-xs">{column}</span>
+                                  <span className="truncate font-mono text-xs">
+                                    {column}
+                                  </span>
                                 </label>
                               ))}
                             </div>
@@ -829,38 +851,6 @@ export function DataSourcesView() {
         </div>
       )}
 
-      {resetOpen && (
-        <div
-          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-4"
-          onClick={() => setResetOpen(false)}
-        >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="reset-sim-title"
-            className="w-full max-w-md rounded-xl border border-border bg-card p-4 shadow-lg"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h2 id="reset-sim-title" className="text-sm font-medium">
-              Reset simulation
-            </h2>
-            <p className="mt-2 text-sm text-muted-foreground">
-              This clears current playback progress and chart history. Data sources stay in
-              place.
-            </p>
-            {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
-            <div className="mt-4 flex justify-end gap-2">
-              <Button variant="ghost" onClick={() => setResetOpen(false)}>
-                Cancel
-              </Button>
-              <Button disabled={busy} onClick={() => void confirmReset()}>
-                Clear progress
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {deleteOpen && (
         <div
           className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-4"
@@ -877,8 +867,9 @@ export function DataSourcesView() {
               Delete data sources
             </h2>
             <p className="mt-2 text-sm text-muted-foreground">
-              Remove {selected.size} y-axis source{selected.size === 1 ? "" : "s"} from
-              the current simulation. The original file stays.
+              Remove {selected.size} y-axis source
+              {selected.size === 1 ? "" : "s"} from the current simulation. The
+              original file stays.
             </p>
             {selectedLabels.length > 0 && (
               <ul className="mt-3 max-h-32 list-disc overflow-y-auto pl-5 text-sm">
